@@ -195,7 +195,7 @@ function getGlassCausticTint(cutoutPath: string): string | null {
  */
 function buildGroundingShadowBackground(causticTint: string | null): string {
   const layers: string[] = [
-    'radial-gradient(ellipse 30% 24% at 50% 48%, rgba(8, 12, 22, 0.72) 0%, rgba(10, 15, 28, 0.36) 52%, rgba(10, 15, 28, 0) 100%)',
+    'radial-gradient(ellipse 34% 26% at 50% 52%, rgba(8, 12, 22, 0.84) 0%, rgba(10, 15, 28, 0.44) 50%, rgba(10, 15, 28, 0) 100%)',
   ];
   if (causticTint) {
     layers.push(
@@ -500,7 +500,20 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     const onResize = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        setViewport({ width: window.innerWidth, height: window.innerHeight });
+        const nextW = window.innerWidth;
+        const nextH = window.innerHeight;
+        setViewport((prev) => {
+          // On mobile, browser address-bar show/hide changes height by ~56-100px
+          // without changing width; ignoring those prevents vertical table jumps during scroll.
+          if (
+            nextW < 1024 &&
+            nextW === prev.width &&
+            Math.abs(nextH - prev.height) < 120
+          ) {
+            return prev;
+          }
+          return { width: nextW, height: nextH };
+        });
       }, 150);
     };
     window.addEventListener('resize', onResize);
@@ -516,29 +529,54 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     const vh = viewport.height;
 
     if (vw < 1024) {
-      const tableDiameter = Math.min(460, Math.max(376, vw * 1.14));
+      // Dynamic Arc Geometry: scale the marble ring diameter proportionally to
+      // item count so adjacent cups ALWAYS have ~42–50px of clean marble space
+      // (zero overlap even for 9–10 item categories like hot-coffee & tea-herbal).
+      const itemCount = Math.max(4, items.length);
+      const dishSize = Math.round(Math.min(116, Math.max(96, vw * 0.285)));
+      const ringRadiusPct = 37.5;
+      const targetChordPx = dishSize * 1.44;
+      const minRingRadiusPx =
+        targetChordPx / (2 * Math.sin(Math.PI / itemCount));
+      const tableDiameter = Math.round(
+        Math.min(760, Math.max(440, minRingRadiusPx / (ringRadiusPct / 100))),
+      );
+      const ringRadiusPx = (tableDiameter * ringRadiusPct) / 100;
+
       const overviewScale = Math.min(
-        (vw - 28) / tableDiameter,
-        (vh - 230) / tableDiameter,
+        (vw - 24) / tableDiameter,
+        (vh - 220) / tableDiameter,
       );
 
-      // Mobile sits cleanly below the 56px header + 44px top category strip (y = 100px)
+      // Pin the 6-o'clock focal cup at a consistent luxury sweet-spot regardless of itemCount
       const isCompactPhone = vh < 720;
+      const topScale = 0.96;
+      const frontScale = 0.92;
+      const desiredTopFocalY = isCompactPhone
+        ? Math.max(208, vh * 0.31)
+        : Math.max(236, vh * 0.305);
       const topCx = vw * 0.5;
-      const topCy = isCompactPhone
-        ? Math.max(134, vh * 0.2)
-        : Math.max(146, vh * 0.185);
+      const topCy = desiredTopFocalY - ringRadiusPx * topScale;
+
+      // Project the front-view focal coaster to a consistent Y above the lower card
+      const frontPitchRad = (72 * Math.PI) / 180;
+      const frontLocalY = ringRadiusPx * frontScale;
+      const frontRotY = frontLocalY * Math.cos(frontPitchRad);
+      const frontRotZ = frontLocalY * Math.sin(frontPitchRad);
+      const frontPerspScale = 1320 / Math.max(240, 1320 - frontRotZ);
+      const desiredFrontFocalY = isCompactPhone
+        ? Math.max(320, vh * 0.48)
+        : Math.max(370, vh * 0.485);
       const frontCx = vw * 0.5;
-      const frontCy = isCompactPhone
-        ? Math.max(262, vh * 0.405)
-        : Math.max(304, vh * 0.415);
+      const frontCy = desiredFrontFocalY - frontRotY * frontPerspScale;
+
       const overviewCx = vw * 0.5;
       const overviewCy = vh * 0.53;
 
       return {
         tableDiameter,
-        ringRadiusPct: 30.5,
-        dishSize: Math.round(tableDiameter * 0.275),
+        ringRadiusPct,
+        dishSize,
         tallCutoutH: Math.round(
           isCompactPhone
             ? Math.min(148, vh * 0.222)
@@ -554,8 +592,8 @@ export const RotaryTableStage = memo(function RotaryTableStage({
         scale: overviewMode
           ? overviewScale
           : isFrontCamera
-            ? 0.92
-            : 0.94,
+            ? frontScale
+            : topScale,
         pitch: isFrontCamera ? 72 : 0,
         perspective: isFrontCamera ? 1320 : 1700,
       };
@@ -777,11 +815,12 @@ export const RotaryTableStage = memo(function RotaryTableStage({
               slotAngleDeg,
             });
 
-            const seatOpacity =
-              standingReveal *
-              (proj.frontness >= 0.05
+            // Smooth depth fade for far-rear glasses (especially on compact mobile screens)
+            const rearFade =
+              proj.frontness >= -0.05
                 ? 1
-                : Math.max(0.9, 0.9 + (proj.frontness + 1) * 0.095));
+                : 0.25 + 0.75 * smoothstep(-0.92, -0.05, proj.frontness);
+            const seatOpacity = standingReveal * rearFade;
 
             writeStyleNums(
               wrapper,
@@ -812,7 +851,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
               // button element is keyed by item.id, so they are excluded
               // from the numeric key — only the moving scales are compared.
               const shiftPct = isCup ? -45.5 : -50;
-              const yOff = isCup ? 3 : 1;
+              const yOff = isCup ? 9 : 6;
               const sx = proj.perspScale;
               const sy = proj.perspScale * revealScaleY;
               writeStyleNums(btnEl, 'transform', [sx, sy], () =>
@@ -990,26 +1029,32 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     active: boolean;
     startX: number;
     startY: number;
+    lastX: number;
     startWheelAngle: number;
     lastPointerAngle: number;
-    snapshotAngle: number;
+    snapshotWheelAngle: number;
     snapshotTime: number;
     centerX: number;
     centerY: number;
     pointerId: number;
     captureSet: boolean;
+    isLinearMobile: boolean;
+    axisLock: 'none' | 'horizontal' | 'vertical';
   }>({
     active: false,
     startX: 0,
     startY: 0,
+    lastX: 0,
     startWheelAngle: 0,
     lastPointerAngle: 0,
-    snapshotAngle: 0,
+    snapshotWheelAngle: 0,
     snapshotTime: 0,
     centerX: 0,
     centerY: 0,
     pointerId: -1,
     captureSet: false,
+    isLinearMobile: false,
+    axisLock: 'none',
   });
 
   const handleStageWheel = (e: React.WheelEvent<HTMLDivElement>) => {
@@ -1046,14 +1091,17 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       active: true,
       startX: e.clientX,
       startY: e.clientY,
+      lastX: e.clientX,
       startWheelAngle: animRef.current.wheelAngle,
       lastPointerAngle: angle,
-      snapshotAngle: angle,
+      snapshotWheelAngle: animRef.current.wheelAngle,
       snapshotTime: now,
       centerX,
       centerY,
       pointerId: e.pointerId,
       captureSet: false,
+      isLinearMobile: isMobile,
+      axisLock: 'none',
     };
   };
 
@@ -1072,54 +1120,63 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       finishDrag(clientX, clientY, false);
       return;
     }
-    // Engage pointer capture once the gesture is unambiguously a drag
-    // (past the 16px tap threshold) so moves keep flowing even if the
-    // finger slides off the stage or over an overlaying element.
-    // Capturing on pointerdown would retarget the pointerup to the stage
-    // and break the plate buttons' click, so it must stay deferred.
-    if (!drag.captureSet) {
-      const distFromStart = Math.hypot(
-        clientX - drag.startX,
-        clientY - drag.startY,
-      );
-      if (distFromStart >= 12) {
-        drag.captureSet = true;
-        try {
-          stageRef.current?.setPointerCapture(drag.pointerId);
-        } catch {
-          // Pointer already gone — capture is best-effort.
-        }
-      }
+    const dxTotal = clientX - drag.startX;
+    const dyTotal = clientY - drag.startY;
+    const distFromStart = Math.hypot(dxTotal, dyTotal);
+
+    // Directional lock on mobile: if the user is clearly scrolling vertically down
+    // toward the footer, yield immediately instead of fighting the scroll.
+    if (drag.isLinearMobile && drag.axisLock === 'none' && distFromStart >= 8) {
+      drag.axisLock =
+        Math.abs(dxTotal) >= Math.abs(dyTotal) * 0.85
+          ? 'horizontal'
+          : 'vertical';
     }
-    const angle = pointerAngleDeg(
-      clientX,
-      clientY,
-      drag.centerX,
-      drag.centerY,
-    );
-    // Too close to the hub: atan2 is unstable there, so track the angle but
-    // don't rotate — this also keeps tracking continuous if the finger crosses
-    // the center.
-    const radius = Math.hypot(clientX - drag.centerX, clientY - drag.centerY);
-    if (radius < 24) {
-      drag.lastPointerAngle = angle;
+    if (drag.axisLock === 'vertical') {
       return;
     }
-    // Angular 1:1 tracking: the wheel turns by exactly the angle the finger
-    // sweeps around the table center, so the grabbed cup follows the finger
-    // everywhere on the disc — including the front, where a linear mapping
-    // moved the cups opposite to the finger.
-    const delta = wrapDeltaDeg(angle - drag.lastPointerAngle);
-    drag.lastPointerAngle = angle;
+
+    if (!drag.captureSet && distFromStart >= 10) {
+      drag.captureSet = true;
+      try {
+        stageRef.current?.setPointerCapture(drag.pointerId);
+      } catch {
+        // Pointer already gone — capture is best-effort.
+      }
+    }
+
+    let delta = 0;
+    if (drag.isLinearMobile) {
+      // Intuitive one-handed horizontal swipe on mobile: swiping right rotates
+      // the front focal cup smoothly rightward (counter-clockwise = -delta).
+      const stepX = clientX - drag.lastX;
+      drag.lastX = clientX;
+      delta = -stepX * 0.38;
+    } else {
+      const angle = pointerAngleDeg(
+        clientX,
+        clientY,
+        drag.centerX,
+        drag.centerY,
+      );
+      const radius = Math.hypot(clientX - drag.centerX, clientY - drag.centerY);
+      if (radius < 24) {
+        drag.lastPointerAngle = angle;
+        return;
+      }
+      delta = wrapDeltaDeg(angle - drag.lastPointerAngle);
+      drag.lastPointerAngle = angle;
+    }
+
+    const nextWheel = animRef.current.wheelAngle + delta;
     animRef.current = {
       ...animRef.current,
-      wheelAngle: animRef.current.wheelAngle + delta,
+      wheelAngle: nextWheel,
     };
     paintFrame(animRef.current);
-    // Refresh the trailing ~100ms velocity snapshot at most every 100ms
     const now = performance.now();
-    if (now - drag.snapshotTime >= 100) {
-      drag.snapshotAngle = angle;
+    if (now - drag.snapshotTime >= 90) {
+      drag.snapshotWheelAngle = nextWheel;
       drag.snapshotTime = now;
     }
   };
@@ -1186,11 +1243,18 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       return;
     }
 
-    // Release angular velocity over the trailing ~100ms window
-    // (snapshot -> release). 0.12 deg/ms ≈ a deliberate flick at any grab radius.
-    const angleDelta = wrapDeltaDeg(
-      drag.lastPointerAngle - drag.snapshotAngle,
-    );
+    // If mobile gesture locked to vertical scroll, restore angle cleanly without stepping
+    if (drag.axisLock === 'vertical') {
+      animRef.current = {
+        ...animRef.current,
+        wheelAngle: drag.startWheelAngle,
+      };
+      paintFrame(animRef.current);
+      return;
+    }
+
+    // Release angular velocity over the trailing ~90ms window (works for both mobile swipe & desktop polar drag)
+    const angleDelta = animRef.current.wheelAngle - drag.snapshotWheelAngle;
     const velocityDegPerMs =
       angleDelta / Math.max(1, now - drag.snapshotTime);
 
@@ -1420,9 +1484,11 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                       : 0.98
                     : isActive
                       ? isMobile
-                        ? 1.18
+                        ? 1.16
                         : 1.32
-                      : 0.88;
+                      : isMobile
+                        ? 0.86
+                        : 0.88;
                   const isBroken = Boolean(brokenImages[item.id]);
 
                   return (
@@ -1508,6 +1574,11 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                           />
                         )}
 
+                        {/* Warm alabaster saucer base so slot never looks empty while decoding on slow networks */}
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-[16%] rounded-full border border-[#B5945B]/16 bg-[#E9E4DA]/70"
+                        />
                         {!isBroken ? (
                           <FadeInImage
                             src={isMobile ? toThumbSrc(item.image) : item.image}
@@ -1609,13 +1680,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
             const rawDiff = Math.abs(idx - activeIndex);
             const ringDist = Math.min(rawDiff, items.length - rawDiff);
 
-            // On mobile phones, cull distant rear glasses (ringDist >= 3) to slash GPU layers by ~45%
-            if (isMobile && items.length > 3 && ringDist > deviceProfile.maxMobileRingDist) {
-              seatWrapperRefs.current[idx] = null;
-              seatShadowRefs.current[idx] = null;
-              seatBtnRefs.current[idx] = null;
-              return null;
-            }
+            // All category seats stay mounted so rotating the table never pops glasses in/out abruptly.
 
             const isActive = idx === activeIndex;
             const isCup = item.vesselType === 'cup';

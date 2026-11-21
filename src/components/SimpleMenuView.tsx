@@ -26,25 +26,9 @@ import {
 import {
   groupMenuForSimpleView,
 } from '../utils/menuLogic';
-import { AnimatedContent } from './AnimatedContent';
 import { FadeInImage, toThumbSrc } from './FadeInImage';
 import { InstagramIcon } from './InstagramIcon';
 import { localizeCategory, localizeItem, useLanguage } from '../i18n/LanguageContext';
-
-/**
- * Off-screen cards skip rendering until near the viewport (P1-1):
- * `content-visibility: auto` + an intrinsic-size estimate close to the
- * real card height (~180px: 96–112px thumb row + paddings + the 41px
- * footer). The `auto` keyword remembers each card's real height after its
- * first render, so the estimate only applies before first paint — the
- * scrollbar length self-corrects as cards render. Applied to the <article>
- * (inside the AnimatedContent wrapper), never to the observed wrapper
- * itself, so the reveal observer always sees a laid-out box.
- */
-const CARD_STYLE: React.CSSProperties = {
-  contentVisibility: 'auto',
-  containIntrinsicSize: 'auto 180px',
-};
 
 /** Intrinsic size of the 256px front thumbs (680×508 full-size → 256×191). */
 const THUMB_WIDTH = 256;
@@ -54,8 +38,6 @@ interface MenuItemCardProps {
   item: MenuItem;
   /** The bean the user picked for this item in the drawer (if any). */
   preferredBean: BeanType | undefined;
-  /** Stagger delay in seconds (50ms/card, capped at 400ms). */
-  delay: number;
   /** First-row cards load eagerly so the above-the-fold thumbs arrive first. */
   eager: boolean;
   onSelectItemDetails: (item: MenuItem) => void;
@@ -74,7 +56,6 @@ interface MenuItemCardProps {
 const MenuItemCard = React.memo(function MenuItemCard({
   item,
   preferredBean,
-  delay,
   eager,
   onSelectItemDetails,
   onInspectOnTable,
@@ -88,15 +69,8 @@ const MenuItemCard = React.memo(function MenuItemCard({
     typeof item.priceArabica100 === 'number';
 
   return (
-    <AnimatedContent
-      distance={24}
-      duration={0.6}
-      delay={delay}
-      className="h-full"
-    >
       <article
         className="group flex h-full flex-col overflow-hidden rounded-[14px] border border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] transition-colors hover:border-[rgba(181,148,91,0.38)]"
-        style={CARD_STYLE}
       >
         {/* Top Row: Studio Eye-Level Photo + Name + Description */}
         <div className="flex gap-3.5 p-3.5">
@@ -220,7 +194,6 @@ const MenuItemCard = React.memo(function MenuItemCard({
           </button>
         </div>
       </article>
-    </AnimatedContent>
   );
 });
 
@@ -442,7 +415,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                 className="scroll-mt-32"
               >
                 {/* Section Header */}
-                <AnimatedContent distance={20} duration={0.6}>
+                
                   <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-[rgba(107,112,67,0.1)] pb-3.5">
                     <div>
                       <div className="flex items-center gap-2.5">
@@ -477,11 +450,11 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                       </div>
                     )}
                   </div>
-                </AnimatedContent>
+                
 
                 {/* Coming Soon Card vs Active Item Grid */}
                 {category.comingSoon ? (
-                  <AnimatedContent distance={24} duration={0.6} delay={0.05}>
+                  
                     <div className="flex flex-col justify-between gap-4 rounded-[16px] border border-[rgba(154,161,106,0.28)] bg-[#FFFFFF] p-6 sm:flex-row sm:items-center">
                       <div className="max-w-2xl">
                         <p className="text-xs font-medium text-[#9AA16A]">
@@ -501,7 +474,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                         <span>{t.notifyLaunch}</span>
                       </a>
                     </div>
-                  </AnimatedContent>
+                  
                 ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {items.map((item, idx) => (
@@ -509,7 +482,6 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                         key={item.id}
                         item={item}
                         preferredBean={selectedBeans[item.id]}
-                        delay={Math.min(idx * 0.05, 0.4)}
                         eager={sectionIdx === 0 && idx < 3}
                         onSelectItemDetails={handleSelectItemDetails}
                         onInspectOnTable={handleInspectOnTable}

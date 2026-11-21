@@ -40,6 +40,7 @@ import { EyvanLogo } from './components/EyvanLogo';
 import { SplashScreen } from './components/SplashScreen';
 import { CameraAngle, RotaryTableStage } from './components/RotaryTableStage';
 import { InstagramIcon } from './components/InstagramIcon';
+import { preloadAndDecodeImage, toThumbSrc } from './components/FadeInImage';
 import { prefersReducedMotion } from './utils/motion';
 import { getDeviceProfile } from './utils/deviceTier';
 import { localizeCategory, localizeItem, useLanguage } from './i18n/LanguageContext';
@@ -380,6 +381,17 @@ export default function App() {
   );
 
   const lastKeyStepRef = useRef<number>(0);
+  const cardSwipeRef = useRef<{ x: number; y: number } | null>(null);
+
+  const warmCategoryPlates = useCallback((catId: CategoryId) => {
+    const mobile = typeof window !== 'undefined' && window.innerWidth < 1024;
+    const urls = new Set(
+      MENU_ITEMS.filter((i) => i.categoryId === catId).map((i) =>
+        mobile ? toThumbSrc(i.image) : i.image,
+      ),
+    );
+    for (const u of urls) preloadAndDecodeImage(u);
+  }, []);
 
   const localizedCategories = useMemo(
     () => MENU_CATEGORIES.map((c) => localizeCategory(c, lang)),
@@ -826,6 +838,8 @@ export default function App() {
                         mobileDockButtonsRef.current[category.id] = el;
                       }}
                       type="button"
+                      onPointerDown={() => warmCategoryPlates(category.id)}
+                      onMouseEnter={() => warmCategoryPlates(category.id)}
                       onClick={() => handleSelectCategory(category.id)}
                       aria-current={isActive ? 'page' : undefined}
                       className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[8px] px-2.5 text-[11.5px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
@@ -912,6 +926,23 @@ export default function App() {
             }`}
           >
             <div
+              onTouchStart={(e) => {
+                if (overviewMode || activeCategory.comingSoon || categoryItems.length <= 1) return;
+                const touch = e.touches[0];
+                if (touch) cardSwipeRef.current = { x: touch.clientX, y: touch.clientY };
+              }}
+              onTouchEnd={(e) => {
+                const start = cardSwipeRef.current;
+                cardSwipeRef.current = null;
+                if (!start || overviewMode || activeCategory.comingSoon || categoryItems.length <= 1) return;
+                const touch = e.changedTouches[0];
+                if (!touch) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+                  handleStepItem(dx > 0 ? -1 : 1);
+                }
+              }}
               className={`pointer-events-auto w-full max-w-[460px] rounded-[18px] border border-[rgba(107,112,67,0.12)] bg-[#F8F7F2]/94 px-4 py-3.5 lg:max-w-[440px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 ${
                 overviewMode ? 'pointer-events-none' : ''
               }`}
@@ -1202,11 +1233,33 @@ export default function App() {
                       <span>{t.fullTrayView}</span>
                     </button>
 
-                    <span className="text-[11px] text-[#78716C] lg:hidden">
-                      {cameraAngle === 'front'
-                        ? t.dragHintFront
-                        : t.dragHintTop}
-                    </span>
+                    {/* Interactive pagination dots on mobile for effortless one-thumb navigation */}
+                    {categoryItems.length > 1 && (
+                      <div
+                        className="flex items-center gap-1.5 lg:hidden"
+                        role="tablist"
+                        aria-label={activeCategory.name}
+                      >
+                        {categoryItems.map((it, idx) => {
+                          const activeDot = idx === safeIndex;
+                          return (
+                            <button
+                              key={it.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={activeDot}
+                              aria-label={it.name}
+                              onClick={() => handleSelectIndex(idx)}
+                              className={`h-2 rounded-full transition-[width,background-color] duration-200 ${
+                                activeDot
+                                  ? 'w-5 bg-[#6B7043]'
+                                  : 'w-2 bg-[#6B7043]/25 hover:bg-[#6B7043]/50'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -1229,6 +1282,8 @@ export default function App() {
                         dockButtonsRef.current[category.id] = el;
                       }}
                       type="button"
+                      onPointerDown={() => warmCategoryPlates(category.id)}
+                      onMouseEnter={() => warmCategoryPlates(category.id)}
                       onClick={() => handleSelectCategory(category.id)}
                       aria-current={isActive ? 'page' : undefined}
                       className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-3 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
