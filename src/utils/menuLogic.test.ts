@@ -33,17 +33,17 @@ test('menu contains all 67 items across 8 active categories and 3 upcoming secti
 
   for (const item of MENU_ITEMS) {
     assert.ok(
-      item.image.startsWith('/src/assets/images/topdown_') &&
+      item.image.startsWith('src/assets/images/topdown_') &&
         item.image.endsWith('.webp'),
       `Missing optimized WebP overhead photo for ${item.id}`,
     );
     assert.ok(
-      item.frontImage.startsWith('/src/assets/images/eyvan_') &&
+      item.frontImage.startsWith('src/assets/images/eyvan_') &&
         item.frontImage.endsWith('.webp'),
       `Missing optimized WebP front glass photo for ${item.id}`,
     );
     assert.ok(
-      item.cutoutImage.startsWith('/src/assets/images/cutouts/') &&
+      item.cutoutImage.startsWith('src/assets/images/cutouts/') &&
         item.cutoutImage.endsWith('.webp'),
       `Missing transparent WebP cutout for ${item.id}`,
     );
