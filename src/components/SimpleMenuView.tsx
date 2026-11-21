@@ -1,5 +1,6 @@
 import React, {
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -245,6 +246,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   onReady,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   // Stable card callbacks (P1-2): App passes `onSelectItemDetails` as a
   // fresh inline arrow on every render (App.tsx), which would defeat the
@@ -290,9 +292,9 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
         MENU_CATEGORIES,
         MENU_ITEMS,
         selectedCategory,
-        searchQuery,
+        deferredSearchQuery,
       ),
-    [selectedCategory, searchQuery],
+    [selectedCategory, deferredSearchQuery],
   );
 
   const totalVisibleItems = useMemo(

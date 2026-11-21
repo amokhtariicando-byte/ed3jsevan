@@ -3,6 +3,7 @@ import { Check, Clock, Copy, ExternalLink, MapPin, Thermometer, X } from 'lucide
 import { CAFE_INFO } from '../data/menuData';
 import { EyvanLogo } from './EyvanLogo';
 import { InstagramIcon } from './InstagramIcon';
+import { useBodyScrollLock } from '../utils/motion';
 
 interface CafeInfoModalProps {
   open: boolean;
@@ -18,6 +19,7 @@ export const CafeInfoModal: React.FC<CafeInfoModalProps> = ({
     'closed' | 'open' | 'closing'
   >('closed');
   const closeTimerRef = useRef<number | undefined>(undefined);
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (!open) return;

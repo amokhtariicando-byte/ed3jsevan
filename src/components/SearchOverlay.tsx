@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { MENU_CATEGORIES, MENU_ITEMS, MenuItem } from '../data/menuData';
 import {
@@ -9,6 +9,7 @@ import {
   toPersianDigits,
 } from '../utils/menuLogic';
 import { FadeInImage, toThumbSrc } from './FadeInImage';
+import { useBodyScrollLock } from '../utils/motion';
 
 interface SearchOverlayProps {
   open: boolean;
@@ -22,6 +23,8 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
   onSelectMenuItem,
 }) => {
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  useBodyScrollLock(open);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [panelState, setPanelState] = useState<
     'closed' | 'open' | 'closing'
@@ -63,9 +66,9 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
   );
 
   const results = useMemo(() => {
-    if (!query.trim()) return MENU_ITEMS.slice(0, 12);
-    return filterMenuItems(MENU_ITEMS, 'hot-coffee', query);
-  }, [query]);
+    if (!deferredQuery.trim()) return MENU_ITEMS.slice(0, 12);
+    return filterMenuItems(MENU_ITEMS, 'hot-coffee', deferredQuery);
+  }, [deferredQuery]);
 
   if (!open) return null;
 
@@ -118,18 +121,14 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
             </div>
           ) : (
             <ul className="space-y-1">
-              {results.map((item, idx) => {
+              {results.map((item) => {
                 const basePrice = calculateItemPrice(
                   item,
                   getDefaultBean(item),
                   null,
                 );
                 return (
-                  <li
-                    key={item.id}
-                    className="eyvan-card-enter"
-                    style={{ animationDelay: `${Math.min(idx * 20, 200)}ms` }}
-                  >
+                  <li key={item.id}>
                     <button
                       type="button"
                       onClick={() => {

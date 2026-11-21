@@ -1,5 +1,6 @@
 import React, {
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -40,6 +41,7 @@ import { EyvanLogo } from './components/EyvanLogo';
 import { SplashScreen } from './components/SplashScreen';
 import { CameraAngle, RotaryTableStage } from './components/RotaryTableStage';
 import { InstagramIcon } from './components/InstagramIcon';
+import { prefersReducedMotion } from './utils/motion';
 
 const SimpleMenuView = lazy(() =>
   import('./components/SimpleMenuView').then((m) => ({
@@ -72,12 +74,7 @@ const AdminApp = lazy(() =>
 
 type ViewMode = 'table' | 'simple';
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  );
-}
+
 
 /**
  * Jump to the top of the page synchronously, with no animation.
@@ -155,19 +152,19 @@ function CrossfadeText({
     node: React.ReactNode;
   } | null>(null);
   const lastRef = useRef({ key: itemKey, node: children });
+  const latestChildrenRef = useRef(children);
+  latestChildrenRef.current = children;
 
   useEffect(() => {
     const prev = lastRef.current;
-    // Always refresh the snapshot, even when the key didn't change, so a
-    // bean-switch price update is what the next crossfade fades out from.
-    lastRef.current = { key: itemKey, node: children };
+    lastRef.current = { key: itemKey, node: latestChildrenRef.current };
     if (prev.key === itemKey) return;
     if (prefersReducedMotion()) {
       setOutgoing(null);
       return;
     }
     setOutgoing({ key: prev.key, node: prev.node });
-  }, [itemKey, children]);
+  }, [itemKey]);
 
   useEffect(() => {
     if (!outgoing) return;
@@ -195,6 +192,80 @@ function CrossfadeText({
     </div>
   );
 }
+
+/**
+ * Isolated zero-App-rerender background tone crossfade layer.
+ * Uses direct DOM style writes on two layers so changing backdrop tone
+ * never triggers the 4x cascading re-render on the 1300-line App tree.
+ */
+const BackdropToneLayer = memo(function BackdropToneLayer({
+  hex,
+  active,
+}: {
+  hex: string;
+  active: boolean;
+}) {
+  const baseRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const committedHexRef = useRef<string>(hex);
+
+  useEffect(() => {
+    const baseEl = baseRef.current;
+    const overlayEl = overlayRef.current;
+    if (!baseEl || !overlayEl) return;
+
+    if (!active) {
+      committedHexRef.current = hex;
+      baseEl.style.backgroundColor = hex;
+      overlayEl.style.opacity = '0';
+      return;
+    }
+
+    if (hex === committedHexRef.current) return;
+
+    overlayEl.style.backgroundColor = hex;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        if (overlayRef.current) {
+          overlayRef.current.style.opacity = '1';
+        }
+      });
+    });
+
+    const timer = window.setTimeout(() => {
+      committedHexRef.current = hex;
+      if (baseRef.current) baseRef.current.style.backgroundColor = hex;
+      if (overlayRef.current) overlayRef.current.style.opacity = '0';
+    }, BG_FADE_MS + 40);
+
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+      window.clearTimeout(timer);
+    };
+  }, [hex, active]);
+
+  return (
+    <>
+      <div
+        ref={baseRef}
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 -z-10"
+        style={{ backgroundColor: committedHexRef.current }}
+      />
+      {active && (
+        <div
+          ref={overlayRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 transition-opacity duration-400 ease-out"
+          style={{ opacity: 0 }}
+        />
+      )}
+    </>
+  );
+});
 
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('table');
@@ -359,49 +430,7 @@ export default function App() {
   // Opacity-only fades are deliberately kept under prefers-reduced-motion
   // (same precedent as .eyvan-view-enter and the overlay backdrops in
   // index.css), so there is no motion guard here.
-  const [bgBase, setBgBase] = useState(backdropHex);
-  const [bgOverlay, setBgOverlay] = useState<{hex: string; on: boolean}>({
-    hex: backdropHex,
-    on: false,
-  });
-  useEffect(() => {
-    if (backdropHex === bgBase && !bgOverlay.on) return;
-    if (viewMode === 'simple') {
-      // Instant commit: the simple menu's in-flow content would sit UNDER
-      // a positioned overlay layer, and the view-loading overlay covers
-      // the switch, so no crossfade is visible or needed here.
-      setBgBase(backdropHex);
-      setBgOverlay((prev) => (prev.on ? {...prev, on: false} : prev));
-      return;
-    }
-    let raf = 0;
-    if (!bgOverlay.on) {
-      // Mount the overlay transparent, then fade it in on the next frame
-      // — setting opacity in the same commit as the mount would skip the
-      // transition (no starting style to animate from). Double rAF: the
-      // first frame paints the transparent layer, the second starts the
-      // fade.
-      setBgOverlay({hex: backdropHex, on: false});
-      raf = window.requestAnimationFrame(() => {
-        raf = window.requestAnimationFrame(() =>
-          setBgOverlay({hex: backdropHex, on: true}),
-        );
-      });
-    } else {
-      // Overlay already up (rapid stepping): just retarget its color — one
-      // instant repaint of that layer — and restart the commit timer.
-      // Resetting opacity to 0 mid-fade would flicker.
-      setBgOverlay({hex: backdropHex, on: true});
-    }
-    const timer = window.setTimeout(() => {
-      setBgBase(backdropHex);
-      setBgOverlay((prev) => ({...prev, on: false}));
-    }, BG_FADE_MS + 50);
-    return () => {
-      window.cancelAnimationFrame(raf);
-      window.clearTimeout(timer);
-    };
-  }, [backdropHex, bgBase, bgOverlay.on, viewMode]);
+  // Backdrop tone crossfade is isolated inside <BackdropToneLayer />.
 
   // Keep the active category pill centered horizontally inside its own scroll rail (without ever vertically scrolling the page!)
   useEffect(() => {
@@ -521,6 +550,10 @@ export default function App() {
     setViewLoading(false);
   }, []);
 
+  const handleOpenMobileCategories = useCallback(() => {
+    setMobileCatsOpen(true);
+  }, []);
+
   const handleToggleViewMode = useCallback(() => {
     // Jump to the top synchronously BEFORE the view swaps, in BOTH
     // directions (see scrollToTopInstant). The old code scrolled smoothly
@@ -621,24 +654,9 @@ export default function App() {
   return (
     <div
       className="relative min-h-screen w-full overflow-x-hidden text-[#2F321C]"
-      style={{ backgroundColor: bgBase }}
+      style={{ backgroundColor: viewMode === 'simple' ? '#F8F7F2' : undefined }}
     >
-      {/* Background tone crossfade layer (P1-6): opacity-only, driven by
-      the effect above. First child + no z-index, so every positioned piece
-      of table content paints above it; pointer-events-none + aria-hidden
-      so it never intercepts taps or screen readers. Mounted only in table
-      view: the simple menu's content is in-flow (non-positioned), so a
-      positioned overlay would paint ABOVE it — and unmounting here also
-      avoids a 400ms fade-out veil if the user switches views mid-fade. */}
-      {viewMode === 'table' && (
-        <div
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 transition-opacity duration-400 ease-out ${
-            bgOverlay.on ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{ backgroundColor: bgOverlay.hex }}
-        />
-      )}
+      <BackdropToneLayer hex={backdropHex} active={viewMode === 'table'} />
       {splash !== 'gone' && <SplashScreen leaving={splash === 'leaving'} />}
       {/* View-switch loading overlay: rendered at App root level, OUTSIDE
       the `.eyvan-view-enter` div — an ancestor with opacity < 1 becomes the
@@ -755,7 +773,7 @@ export default function App() {
               selectedBeans={selectedBeans}
               onSelectItemDetails={handleSelectItemDetails}
               onInspectOnTable={handleJumpToTableItem}
-              onOpenMobileCategories={() => setMobileCatsOpen(true)}
+              onOpenMobileCategories={handleOpenMobileCategories}
               onReady={handleSimpleMenuReady}
             />
           </Suspense>

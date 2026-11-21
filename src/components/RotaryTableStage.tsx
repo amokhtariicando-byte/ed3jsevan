@@ -22,7 +22,15 @@ import {
   projectTableSeat,
 } from '../utils/tableProjection';
 import { EyvanLogo } from './EyvanLogo';
-import { FadeInImage } from './FadeInImage';
+import {
+  FadeInImage,
+  getCutoutDimensions,
+  isPrebakedTopdownSrc,
+  preloadAndDecodeImage,
+  toMobileCutoutSrc,
+  toThumbSrc,
+} from './FadeInImage';
+import { prefersReducedMotion } from '../utils/motion';
 
 export type CameraAngle = 'top' | 'front';
 
@@ -122,12 +130,7 @@ function writeStyleNums(
   (el.style as unknown as Record<string, string>)[prop] = build();
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  );
-}
+
 
 /**
  * Wraps an angle delta to (-180, 180] so a drag crossing the ±180° seam
@@ -437,9 +440,6 @@ export const RotaryTableStage = memo(function RotaryTableStage({
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const isMobile = viewport.width < 1024;
-  // Render-time reduced-motion probe for the resize size-transitions
-  // below (paintFrame-driven motion probes it separately, per animation).
-  const reduceMotion = prefersReducedMotion();
   const isFrontCamera =
     cameraAngle === 'front' && !overviewMode && !category.comingSoon;
 
@@ -470,15 +470,13 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                 const rawDiff = Math.abs(idx - activeIndex);
                 return Math.min(rawDiff, items.length - rawDiff) <= 2;
               })
-              .map((i) => i.cutoutImage),
+              .map((i) => toMobileCutoutSrc(i.cutoutImage)),
           ),
         )
       : Array.from(new Set(items.map((i) => i.cutoutImage)));
     const preload = () => {
-      for (const src of preloadCutouts) {
-        const img = new Image();
-        img.decoding = 'async';
-        img.src = src;
+      for (const srcUrl of preloadCutouts) {
+        preloadAndDecodeImage(srcUrl);
       }
     };
     if ('requestIdleCallback' in window) {
@@ -808,6 +806,11 @@ export const RotaryTableStage = memo(function RotaryTableStage({
 
   // Synchronously paint current refs whenever DOM nodes mount/resize so there is zero 1-frame flash
   useLayoutEffect(() => {
+    coasterRefs.current.length = items.length;
+    plateBtnRefs.current.length = items.length;
+    seatWrapperRefs.current.length = items.length;
+    seatShadowRefs.current.length = items.length;
+    seatBtnRefs.current.length = items.length;
     paintFrame(animRef.current);
   }, [
     paintFrame,
@@ -852,9 +855,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       perspective: targetGeo.perspective,
     };
 
-    const reducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = prefersReducedMotion();
 
     if (reducedMotion || categoryChanged) {
       if (rafIdRef.current !== null) {
@@ -999,15 +1000,10 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
-    // The disc's on-screen center (from its own bounding box) is the pivot for
-    // angular dragging — robust to layout, camera mode and scroll.
-    const discRect = wheelDiscRef.current?.getBoundingClientRect();
-    const centerX = discRect
-      ? discRect.left + discRect.width / 2
-      : e.clientX;
-    const centerY = discRect
-      ? discRect.top + discRect.height / 2
-      : e.clientY;
+    // Compute disc pivot from live animation state + scroll offset (avoids
+    // Forced Synchronous Layout via getBoundingClientRect() on pointerdown).
+    const centerX = animRef.current.cx;
+    const centerY = animRef.current.cy - (window.scrollY || 0);
     const angle = pointerAngleDeg(e.clientX, e.clientY, centerX, centerY);
     const now = performance.now();
     // A previous drag's coalesced frame must never leak into this one.
@@ -1056,7 +1052,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
         clientX - drag.startX,
         clientY - drag.startY,
       );
-      if (distFromStart >= 16) {
+      if (distFromStart >= 12) {
         drag.captureSet = true;
         try {
           stageRef.current?.setPointerCapture(drag.pointerId);
@@ -1168,25 +1164,34 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     const velocityDegPerMs =
       angleDelta / Math.max(1, now - drag.snapshotTime);
 
-    // Fast flick: step once in the flick direction (counter-clockwise = next)
-    if (allowFlick && Math.abs(velocityDegPerMs) > 0.12) {
-      onStep(velocityDegPerMs < 0 ? 1 : -1);
-      return;
-    }
-
-    // Otherwise settle onto the nearest slot (closest to the 6 o'clock focal)
+    // Momentum projection: project the wheel forward proportionally to release
+    // velocity so a deliberate flick glides naturally 1–3 slots forward and
+    // never snaps backward after a multi-slot drag.
     const count = Math.max(1, items.length);
-    const wheel = animRef.current.wheelAngle;
+    const momentumDeg =
+      allowFlick && Math.abs(velocityDegPerMs) > 0.1
+        ? Math.max(-135, Math.min(135, velocityDegPerMs * 185))
+        : 0;
+    const projectedWheel = animRef.current.wheelAngle + momentumDeg;
     let nearestIndex = activeIndex;
     let bestDelta = Infinity;
     for (let i = 0; i < count; i++) {
-      const slotAngle = (i / count) * 360 + wheel;
+      const slotAngle = (i / count) * 360 + projectedWheel;
       const delta = (((slotAngle - FOCAL_ANGLE_DEG) % 360) + 540) % 360 - 180;
       const absDelta = Math.abs(delta);
       if (absDelta < bestDelta) {
         bestDelta = absDelta;
         nearestIndex = i;
       }
+    }
+    // Guarantee at least a 1-slot step on a crisp short flick that didn't cross a slot midpoint
+    if (
+      nearestIndex === activeIndex &&
+      allowFlick &&
+      Math.abs(velocityDegPerMs) > 0.14
+    ) {
+      onStep(velocityDegPerMs < 0 ? 1 : -1);
+      return;
     }
 
     if (nearestIndex !== activeIndex) {
@@ -1208,9 +1213,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
     }
-    const reducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = prefersReducedMotion();
     if (reducedMotion) {
       animRef.current = { ...animRef.current, wheelAngle: targetAngle };
       paintFrame(animRef.current);
@@ -1455,15 +1458,12 @@ export const RotaryTableStage = memo(function RotaryTableStage({
 
                         {!isBroken ? (
                           <FadeInImage
-                            src={item.image}
+                            src={isMobile ? toThumbSrc(item.image) : item.image}
+                            fallbackSrc={item.image}
                             alt={item.name}
-                            width={480}
-                            height={480}
+                            width={isMobile ? 256 : 480}
+                            height={isMobile ? 256 : 480}
                             decoding="async"
-                            // P1-8: the front/selected plate is the hero
-                            // image — prioritise its fetch. Other plates
-                            // keep the browser default. FadeInImage passes
-                            // this straight through to the <img>.
                             fetchPriority={isActive ? 'high' : undefined}
                             referrerPolicy="no-referrer"
                             draggable={false}
@@ -1473,7 +1473,11 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                                 [item.id]: true,
                               }))
                             }
-                            className="eyvan-plate-img pointer-events-none h-full w-full rounded-full object-cover"
+                            className={`${
+                              isPrebakedTopdownSrc(item.image)
+                                ? 'eyvan-plate-img-baked'
+                                : 'eyvan-plate-img'
+                            } pointer-events-none h-full w-full rounded-full object-cover`}
                             style={{
                               transform: `rotate(${item.plateAngle ?? 0}deg)`,
                             }}
@@ -1573,13 +1577,20 @@ export const RotaryTableStage = memo(function RotaryTableStage({
               : getGlassCausticTint(item.cutoutImage);
             const shadowBg = buildGroundingShadowBackground(causticTint);
 
-            // Static cached optical bokeh by discrete ring distance (GPU caches bitmap once -> locked 60fps!)
-            const cachedImgFilter =
-              ringDist === 0
-                ? 'brightness(1) saturate(1.03) contrast(1.03)'
+            // Zero-blur depth treatment: live CSS blur() combined with per-frame
+            // scale() forces texture re-rasterization on mobile GPUs & Safari.
+            // Depth hierarchy is handled by perspective scale + opacity + subtle tone.
+            const cachedImgFilter = isMobile
+              ? undefined
+              : ringDist === 0
+                ? undefined
                 : ringDist === 1
-                  ? 'blur(1.4px) brightness(0.95) saturate(0.93) contrast(1.02)'
-                  : 'blur(2.6px) brightness(0.89) saturate(0.87) contrast(1.01)';
+                  ? 'brightness(0.95) saturate(0.94)'
+                  : 'brightness(0.88) saturate(0.88)';
+            const cutoutSrc = isMobile
+              ? toMobileCutoutSrc(item.cutoutImage)
+              : item.cutoutImage;
+            const cutoutDims = getCutoutDimensions(item.cutoutImage);
 
             return (
               <div
@@ -1601,13 +1612,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                     height: `${shadowBoxH}px`,
                     transformOrigin: '50% 50%',
                     backgroundImage: shadowBg,
-                    // Size glides with toolbar/rotation resizes (the box
-                    // derives from vh via baseHeight). paintFrame writes
-                    // only transform here, so this never fights the rAF
-                    // loop; reduced-motion keeps the instant change.
-                    transition: reduceMotion
-                      ? undefined
-                      : 'width 300ms ease-out, height 300ms ease-out',
+
                   }}
                 />
 
@@ -1637,28 +1642,22 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                     height: `${baseHeight}px`,
                     width: 'auto',
                     transformOrigin: isCup ? '45.5% 100%' : '50% 100%',
-                    // Height glides with toolbar/rotation resizes (it
-                    // derives from vh) instead of popping ~10-30px while
-                    // the foot position animates smoothly. paintFrame
-                    // writes only transform to this button, so a height
-                    // transition never fights the rAF loop; reduced-motion
-                    // keeps the instant change. (NOT a transform
-                    // transition — those are forbidden on .eyvan-stage-btn.)
-                    transition: reduceMotion
-                      ? undefined
-                      : 'height 300ms ease-out',
+
                   }}
                 >
                   <FadeInImage
-                    src={item.cutoutImage}
+                    src={cutoutSrc}
+                    fallbackSrc={item.cutoutImage}
                     alt={`نمای روبه‌رو ${item.name}`}
+                    width={cutoutDims?.width}
+                    height={cutoutDims?.height}
                     decoding="async"
                     referrerPolicy="no-referrer"
                     draggable={false}
                     className="pointer-events-none block h-full w-auto max-w-none object-contain select-none"
-                    style={{
-                      filter: cachedImgFilter,
-                    }}
+                    style={
+                      cachedImgFilter ? { filter: cachedImgFilter } : undefined
+                    }
                   />
                 </button>
               </div>

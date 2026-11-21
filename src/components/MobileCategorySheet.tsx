@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { CategoryId, MENU_CATEGORIES, MENU_ITEMS } from '../data/menuData';
 import { toPersianDigits } from '../utils/menuLogic';
+import { useBodyScrollLock } from '../utils/motion';
 
 interface MobileCategorySheetProps {
   open: boolean;
@@ -22,6 +23,15 @@ export const MobileCategorySheet: React.FC<MobileCategorySheetProps> = ({
     'closed' | 'open' | 'closing'
   >('closed');
   const closeTimerRef = useRef<number | undefined>(undefined);
+  useBodyScrollLock(open);
+
+  const categoryCounts = useMemo(() => {
+    const map = new Map<CategoryId, number>();
+    for (const item of MENU_ITEMS) {
+      map.set(item.categoryId, (map.get(item.categoryId) ?? 0) + 1);
+    }
+    return map;
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -119,9 +129,7 @@ export const MobileCategorySheet: React.FC<MobileCategorySheetProps> = ({
 
           {MENU_CATEGORIES.map((category) => {
             const isActive = activeCategoryId === category.id;
-            const count = MENU_ITEMS.filter(
-              (item) => item.categoryId === category.id,
-            ).length;
+            const count = categoryCounts.get(category.id) ?? 0;
 
             return (
               <button

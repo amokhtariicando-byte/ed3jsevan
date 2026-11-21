@@ -14,6 +14,7 @@ import {
   toPersianDigits,
 } from '../utils/menuLogic';
 import { FadeInImage } from './FadeInImage';
+import { useBodyScrollLock } from '../utils/motion';
 
 interface DrinkCustomizeDrawerProps {
   item: MenuItem | null;
@@ -38,6 +39,7 @@ export const DrinkCustomizeDrawer: React.FC<DrinkCustomizeDrawerProps> = ({
     'closed' | 'open' | 'closing'
   >('closed');
   const closeTimerRef = useRef<number | undefined>(undefined);
+  useBodyScrollLock(Boolean(item));
 
   useEffect(() => {
     if (!item) return;
