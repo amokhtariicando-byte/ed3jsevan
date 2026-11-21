@@ -17,11 +17,24 @@ const topdowns = Array.from(
   ),
 );
 
-for (let i = 0; i < topdowns.length; i++) {
+const navConn = (
+  typeof navigator !== 'undefined'
+    ? (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+    : undefined
+);
+const isSaveData =
+  Boolean(navConn?.saveData) ||
+  navConn?.effectiveType === '2g' ||
+  navConn?.effectiveType === 'slow-2g';
+
+// On Save-Data / 2G only preload the first hero plate
+const preloadList = isSaveData ? topdowns.slice(0, 1) : topdowns;
+
+for (let i = 0; i < preloadList.length; i++) {
   const link = document.createElement('link');
   link.rel = 'preload';
   link.as = 'image';
-  link.href = topdowns[i];
+  link.href = preloadList[i];
   if (i === 0) {
     link.setAttribute('fetchpriority', 'high');
   }
