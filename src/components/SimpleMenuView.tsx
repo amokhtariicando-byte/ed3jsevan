@@ -1,4 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Disc,
   LayoutGrid,
@@ -20,7 +27,201 @@ import {
   groupMenuForSimpleView,
   toPersianDigits,
 } from '../utils/menuLogic';
-import { InstagramIcon } from './CafeInfoModal';
+import { AnimatedContent } from './AnimatedContent';
+import { FadeInImage, toThumbSrc } from './FadeInImage';
+import { InstagramIcon } from './InstagramIcon';
+
+/**
+ * Off-screen cards skip rendering until near the viewport (P1-1):
+ * `content-visibility: auto` + an intrinsic-size estimate close to the
+ * real card height (~180px: 96–112px thumb row + paddings + the 41px
+ * footer). The `auto` keyword remembers each card's real height after its
+ * first render, so the estimate only applies before first paint — the
+ * scrollbar length self-corrects as cards render. Applied to the <article>
+ * (inside the AnimatedContent wrapper), never to the observed wrapper
+ * itself, so the reveal observer always sees a laid-out box.
+ */
+const CARD_STYLE: React.CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 180px',
+};
+
+/** Intrinsic size of the 256px front thumbs (680×508 full-size → 256×191). */
+const THUMB_WIDTH = 256;
+const THUMB_HEIGHT = 191;
+
+interface MenuItemCardProps {
+  item: MenuItem;
+  /** The bean the user picked for this item in the drawer (if any). */
+  preferredBean: BeanType | undefined;
+  /** Stagger delay in seconds (50ms/card, capped at 400ms). */
+  delay: number;
+  /** First-row cards load eagerly so the above-the-fold thumbs arrive first. */
+  eager: boolean;
+  onSelectItemDetails: (item: MenuItem) => void;
+  onInspectOnTable: (item: MenuItem) => void;
+}
+
+/**
+ * One menu card, memoized (P1-2): a search keystroke re-renders
+ * SimpleMenuView, and without this all 67 cards re-rendered with it.
+ * Every prop is stable across keystrokes — `item` is a module-level
+ * MENU_ITEMS reference (groupMenuForSimpleView only filters, never
+ * clones), `preferredBean`/`delay`/`eager` are primitives, and the two
+ * callbacks are the parent's stable latest-ref wrappers — so a keystroke
+ * only re-renders cards whose position or bean actually changed.
+ */
+const MenuItemCard = React.memo(function MenuItemCard({
+  item,
+  preferredBean,
+  delay,
+  eager,
+  onSelectItemDetails,
+  onInspectOnTable,
+}: MenuItemCardProps) {
+  const hasDualBean =
+    typeof item.priceBlend50 === 'number' &&
+    typeof item.priceArabica100 === 'number';
+  const isArabicaOnly =
+    typeof item.priceBlend50 !== 'number' &&
+    typeof item.priceArabica100 === 'number';
+
+  return (
+    <AnimatedContent
+      distance={24}
+      duration={0.6}
+      delay={delay}
+      className="h-full"
+    >
+      <article
+        className="group flex h-full flex-col overflow-hidden rounded-[14px] border border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] transition-colors hover:border-[rgba(181,148,91,0.38)]"
+        style={CARD_STYLE}
+      >
+        {/* Top Row: Studio Eye-Level Photo + Name + Description */}
+        <div className="flex gap-3.5 p-3.5">
+          <button
+            type="button"
+            onClick={() => onSelectItemDetails(item)}
+            aria-label={`مشاهده جزئیات ${item.name}`}
+            className="h-24 w-24 shrink-0 overflow-hidden rounded-[10px] border border-[rgba(107,112,67,0.08)] bg-[#F8F7F2] sm:h-28 sm:w-28"
+          >
+            <FadeInImage
+              src={toThumbSrc(item.frontImage)}
+              fallbackSrc={item.frontImage}
+              alt={item.name}
+              width={THUMB_WIDTH}
+              height={THUMB_HEIGHT}
+              loading={eager ? 'eager' : 'lazy'}
+              decoding="async"
+              referrerPolicy="no-referrer"
+              className="eyvan-card-img h-full w-full object-cover"
+              style={{
+                // The thumb also scales on hover (see
+                // .eyvan-card-img in index.css), so the
+                // fade transition must carry the
+                // transform transition too — one
+                // `transition` property covers both.
+                transition:
+                  'opacity 200ms ease-out, transform 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            />
+          </button>
+
+          <div className="flex min-w-0 flex-1 flex-col justify-between">
+            <div>
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-base font-semibold leading-snug text-[#2F321C]">
+                  {item.name}
+                </h3>
+                {item.highlight && (
+                  <span className="shrink-0 text-[11px] font-medium text-[#9AA16A]">
+                    {item.highlight}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1.5 line-clamp-2 text-xs leading-6 text-[#78716C]">
+                {item.description}
+              </p>
+            </div>
+
+            {/* Pricing Row (No Trailing Zeros) */}
+            <div className="mt-2.5">
+              {hasDualBean ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span
+                    className={`tabular-fa ${
+                      preferredBean === 'arabica100'
+                        ? 'text-[#78716C]'
+                        : 'font-semibold text-[#6B7043]'
+                    }`}
+                  >
+                    ۵۰/۵۰: {formatToman(item.priceBlend50!)}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="text-[#78716C]"
+                  >
+                    ·
+                  </span>
+                  <span
+                    className={`tabular-fa ${
+                      preferredBean === 'arabica100'
+                        ? 'font-semibold text-[#6B7043]'
+                        : 'text-[#57534E]'
+                    }`}
+                  >
+                    عربیکا: {formatToman(item.priceArabica100!)}
+                  </span>
+                </div>
+              ) : isArabicaOnly ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="tabular-fa text-sm font-semibold text-[#6B7043]">
+                    {formatToman(item.priceArabica100!)}
+                  </span>
+                  <span className="text-[11px] text-[#9AA16A]">
+                    ۱۰۰٪ عربیکا
+                  </span>
+                </div>
+              ) : (
+                <span className="tabular-fa text-sm font-semibold text-[#6B7043]">
+                  {formatToman(item.price ?? 0)}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Card Footer Actions */}
+        <div className="mt-auto flex items-center justify-between gap-2 border-t border-[rgba(107,112,67,0.08)] bg-[#FFFFFF] px-3.5 py-2.5">
+          <button
+            type="button"
+            onClick={() => onSelectItemDetails(item)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B7043] transition-colors hover:text-[#4F5330]"
+          >
+            <SlidersHorizontal
+              className="h-3.5 w-3.5 text-[#6B7043]"
+              strokeWidth={1.6}
+            />
+            <span>
+              {item.supportsSyrup
+                ? 'سیروپ و جزئیات'
+                : 'جزئیات محصول'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onInspectOnTable(item)}
+            className="inline-flex items-center gap-1.5 text-xs text-[#78716C] transition-colors hover:text-[#2F321C]"
+          >
+            <Disc className="h-3.5 w-3.5" strokeWidth={1.6} />
+            <span>نمایش روی میز</span>
+          </button>
+        </div>
+      </article>
+    </AnimatedContent>
+  );
+});
 
 interface SimpleMenuViewProps {
   selectedCategory: CategoryId | 'all';
@@ -29,6 +230,9 @@ interface SimpleMenuViewProps {
   onSelectItemDetails: (item: MenuItem) => void;
   onInspectOnTable: (item: MenuItem) => void;
   onOpenMobileCategories: () => void;
+  // Called once when the menu mounts, so App can lift the state-driven
+  // view-switch loading overlay exactly when the menu is ready to paint.
+  onReady?: () => void;
 }
 
 export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
@@ -38,8 +242,47 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   onSelectItemDetails,
   onInspectOnTable,
   onOpenMobileCategories,
+  onReady,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Stable card callbacks (P1-2): App passes `onSelectItemDetails` as a
+  // fresh inline arrow on every render (App.tsx), which would defeat the
+  // MenuItemCard memo on every App re-render. The latest callback is kept
+  // in a ref and the cards get a wrapper whose identity never changes, so
+  // the memo holds across App re-renders too. (The proper fix is a
+  // useCallback in App; this keeps the cards fast regardless.)
+  const detailsRef = useRef(onSelectItemDetails);
+  detailsRef.current = onSelectItemDetails;
+  const inspectRef = useRef(onInspectOnTable);
+  inspectRef.current = onInspectOnTable;
+  const handleSelectItemDetails = useCallback(
+    (item: MenuItem) => detailsRef.current(item),
+    [],
+  );
+  const handleInspectOnTable = useCallback(
+    (item: MenuItem) => inspectRef.current(item),
+    [],
+  );
+
+  // Safety net for the view-switch scroll flash: when this very tall view
+  // mounts (after its lazy chunk loads), the browser's scroll anchoring can
+  // drag the viewport toward the end of the page before the first paint.
+  // useLayoutEffect runs synchronously after the DOM updates but before
+  // paint, so the first frame is always the top of the menu. 'instant' is
+  // required: index.css sets `scroll-behavior: smooth` on <html>, so 'auto'
+  // would still animate. Mount-only: switching categories inside the menu
+  // keeps the user's scroll position, as before.
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
+
+  // Tell App the menu has mounted so the state-driven loading overlay can
+  // lift. The overlay covers the whole lazy-chunk load gap; without this
+  // callback it would stay up until the safety timeout.
+  useEffect(() => {
+    onReady?.();
+  }, [onReady]);
 
   const sections = useMemo(
     () =>
@@ -58,25 +301,25 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#0E1525] pt-20 pb-14 text-[#F8F5EE]">
+    <div className="min-h-screen bg-[#F8F7F2] pt-20 pb-14 text-[#2F321C]">
       <div className="mx-auto max-w-[1320px] px-4 sm:px-6 lg:px-10">
         {/* Top Heading + Search Bar */}
-        <div className="flex flex-col gap-5 border-b border-[rgba(244,241,234,0.1)] pb-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-5 border-b border-[rgba(107,112,67,0.1)] pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-medium text-[#D4B47C]">
+            <p className="text-xs font-medium text-[#6B7043]">
               منوی ساده و دسته‌بندی‌شده · کافه و رستوران ایوان
             </p>
-            <h1 className="mt-1.5 text-2xl font-semibold text-[#F8F5EE] sm:text-3xl">
+            <h1 className="mt-1.5 text-2xl font-semibold text-[#2F321C] sm:text-3xl">
               فهرست کامل نوشیدنی‌ها و بخش‌های منو
             </h1>
-            <p className="mt-1.5 text-xs leading-6 text-[#C4CCD8] sm:text-sm">
+            <p className="mt-1.5 text-xs leading-6 text-[#78716C] sm:text-sm">
               {CAFE_INFO.paymentNote} · تمامی قیمت‌ها بدون صفر و به تومان درج شده است
             </p>
           </div>
 
           <div className="relative w-full lg:max-w-[360px]">
             <Search
-              className="pointer-events-none absolute top-1/2 right-3.5 h-4 w-4 -translate-y-1/2 text-[#D4B47C]"
+              className="pointer-events-none absolute top-1/2 right-3.5 h-4 w-4 -translate-y-1/2 text-[#6B7043]"
               strokeWidth={1.6}
             />
             <input
@@ -85,14 +328,14 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="جستجو در منو (لاته، موهیتو، چای کرک...)"
               aria-label="جستجو در منوی ساده"
-              className="w-full rounded-[10px] border border-[rgba(244,241,234,0.14)] bg-[#142035] py-2.5 pr-10 pl-9 text-sm text-[#F8F5EE] placeholder:text-[#96A2B5] focus:border-[#D4B47C] focus:outline-none"
+              className="w-full rounded-[10px] border border-[rgba(107,112,67,0.14)] bg-[#FFFFFF] py-2.5 pr-10 pl-9 text-sm text-[#2F321C] placeholder:text-[#A8A29E] focus:border-[#B5945B] focus:outline-none"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
                 aria-label="پاک کردن جستجو"
-                className="absolute top-1/2 left-2.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-[#A8B3C5] hover:text-[#F8F5EE]"
+                className="absolute top-1/2 left-2.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[6px] text-[#78716C] hover:text-[#2F321C]"
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.7} />
               </button>
@@ -101,13 +344,13 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
         </div>
 
         {/* Sticky Category Filter Bar (Desktop full strip + Mobile pinned Categories Sheet trigger) */}
-        <div className="sticky top-16 z-20 -mx-4 border-b border-[rgba(244,241,234,0.09)] bg-[#0E1525]/97 px-4 py-3 sm:-mx-6 sm:px-6 md:backdrop-blur-md lg:-mx-10 lg:px-10">
+        <div className="sticky top-16 z-20 -mx-4 border-b border-[rgba(107,112,67,0.09)] bg-[#F8F7F2]/97 px-4 py-3 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
           <div className="flex items-center gap-2">
             {/* Pinned Mobile Category Sheet Trigger */}
             <button
               type="button"
               onClick={onOpenMobileCategories}
-              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] border border-[rgba(212,180,124,0.45)] bg-[#1B2B48] px-3 text-xs font-medium text-[#D4B47C] transition-colors hover:bg-[#23375B] md:hidden"
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] border border-[rgba(181,148,91,0.45)] bg-[#6B7043] px-3 text-xs font-medium text-white transition-colors hover:bg-[#4F5330] md:hidden"
             >
               <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.7} />
               <span>دسته‌ها</span>
@@ -119,8 +362,8 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                 onClick={() => onSelectCategory('all')}
                 className={`inline-flex h-10 shrink-0 items-center rounded-[10px] px-3.5 text-xs font-medium whitespace-nowrap transition-colors ${
                   selectedCategory === 'all'
-                    ? 'border border-[#D4B47C]/55 bg-[#1B2B48] text-[#D4B47C]'
-                    : 'border border-transparent bg-[#131E33] text-[#D5DCE6] hover:bg-[#192740] hover:text-[#F8F5EE]'
+                    ? 'border border-[#B5945B]/55 bg-[#6B7043] text-white'
+                    : 'border border-transparent bg-[#FFFFFF] text-[#57534E] hover:bg-[#E8EAD9] hover:text-[#2F321C]'
                 }`}
               >
                 همه بخش‌ها
@@ -135,8 +378,8 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                     onClick={() => onSelectCategory(category.id)}
                     className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-3.5 text-xs font-medium whitespace-nowrap transition-colors ${
                       isActive
-                        ? 'border border-[#D4B47C]/55 bg-[#1B2B48] text-[#D4B47C]'
-                        : 'border border-transparent bg-[#131E33] text-[#D5DCE6] hover:bg-[#192740] hover:text-[#F8F5EE]'
+                        ? 'border border-[#B5945B]/55 bg-[#6B7043] text-white'
+                        : 'border border-transparent bg-[#FFFFFF] text-[#57534E] hover:bg-[#E8EAD9] hover:text-[#2F321C]'
                     }`}
                   >
                     <span>{category.shortName}</span>
@@ -154,7 +397,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
 
         {/* Search result count line */}
         {searchQuery.trim() && (
-          <p className="mt-5 text-xs text-[#C4CCD8]">
+          <p className="mt-5 text-xs text-[#78716C]">
             {totalVisibleItems > 0
               ? `${toPersianDigits(totalVisibleItems)} محصول منطبق با «${searchQuery.trim()}»`
               : `محصولی با عبارت «${searchQuery.trim()}» یافت نشد`}
@@ -163,8 +406,8 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
 
         {/* Categorized Sections */}
         {sections.length === 0 ? (
-          <div className="mt-10 rounded-[16px] border border-[rgba(244,241,234,0.1)] bg-[#131E33] px-6 py-12 text-center">
-            <p className="text-sm font-medium text-[#F8F5EE]">
+          <div className="mt-10 rounded-[16px] border border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] px-6 py-12 text-center">
+            <p className="text-sm font-medium text-[#2F321C]">
               نتیجه‌ای برای جستجوی شما پیدا نشد
             </p>
             <button
@@ -173,204 +416,93 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
                 setSearchQuery('');
                 onSelectCategory('all');
               }}
-              className="mt-4 rounded-[10px] bg-[#D4B47C] px-4 py-2 text-xs font-medium text-[#0E1525] transition-colors hover:bg-[#E1C48F]"
+              className="mt-4 rounded-[10px] bg-[#6B7043] px-4 py-2 text-xs font-medium text-[#F8F7F2] transition-colors hover:bg-[#4F5330]"
             >
               نمایش همه محصولات
             </button>
           </div>
         ) : (
-          <div className="mt-8 space-y-12">
-            {sections.map(({ category, items }) => (
+          <div key={selectedCategory} className="mt-8 space-y-12">
+            {sections.map(({ category, items }, sectionIdx) => (
               <section
                 key={category.id}
                 aria-labelledby={`simple-cat-${category.id}`}
                 className="scroll-mt-32"
               >
                 {/* Section Header */}
-                <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-[rgba(244,241,234,0.1)] pb-3.5">
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <h2
-                        id={`simple-cat-${category.id}`}
-                        className="text-xl font-semibold text-[#F8F5EE] sm:text-2xl"
-                      >
-                        {category.name}
-                      </h2>
-                      {category.comingSoon ? (
-                        <span className="text-xs font-medium text-[#9AA16A]">
-                          · به‌زودی
-                        </span>
-                      ) : (
-                        <span className="tabular-fa text-xs text-[#A8B3C5]">
-                          ({toPersianDigits(items.length)} مورد)
-                        </span>
-                      )}
+                <AnimatedContent distance={20} duration={0.6}>
+                  <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-[rgba(107,112,67,0.1)] pb-3.5">
+                    <div>
+                      <div className="flex items-center gap-2.5">
+                        <h2
+                          id={`simple-cat-${category.id}`}
+                          className="text-xl font-semibold text-[#2F321C] sm:text-2xl"
+                        >
+                          {category.name}
+                        </h2>
+                        {category.comingSoon ? (
+                          <span className="text-xs font-medium text-[#9AA16A]">
+                            · به‌زودی
+                          </span>
+                        ) : (
+                          <span className="tabular-fa text-xs text-[#78716C]">
+                            ({toPersianDigits(items.length)} مورد)
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs leading-6 text-[#78716C] sm:text-sm">
+                        {category.subtitle}
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs leading-6 text-[#B7C2D4] sm:text-sm">
-                      {category.subtitle}
-                    </p>
-                  </div>
 
-                  {category.isHotCategory && !category.comingSoon && (
-                    <div className="flex items-center gap-2 text-[11px] text-[#C4CCD8]">
-                      <Thermometer
-                        className="h-3.5 w-3.5 shrink-0 text-[#D4B47C]"
-                        strokeWidth={1.6}
-                      />
-                      <span>{CAFE_INFO.milkTempNote}</span>
-                    </div>
-                  )}
-                </div>
+                    {category.isHotCategory && !category.comingSoon && (
+                      <div className="flex items-center gap-2 text-[11px] text-[#78716C]">
+                        <Thermometer
+                          className="h-3.5 w-3.5 shrink-0 text-[#6B7043]"
+                          strokeWidth={1.6}
+                        />
+                        <span>{CAFE_INFO.milkTempNote}</span>
+                      </div>
+                    )}
+                  </div>
+                </AnimatedContent>
 
                 {/* Coming Soon Card vs Active Item Grid */}
                 {category.comingSoon ? (
-                  <div className="flex flex-col justify-between gap-4 rounded-[16px] border border-[rgba(154,161,106,0.28)] bg-[#141E30] p-6 sm:flex-row sm:items-center">
-                    <div className="max-w-2xl">
-                      <p className="text-xs font-medium text-[#9AA16A]">
-                        آشپزخانه کافه و رستوران ایوان · به‌زودی
-                      </p>
-                      <p className="mt-2 text-sm leading-7 text-[#DCE2EC]">
-                        {category.comingSoonDescription}
-                      </p>
+                  <AnimatedContent distance={24} duration={0.6} delay={0.05}>
+                    <div className="flex flex-col justify-between gap-4 rounded-[16px] border border-[rgba(154,161,106,0.28)] bg-[#FFFFFF] p-6 sm:flex-row sm:items-center">
+                      <div className="max-w-2xl">
+                        <p className="text-xs font-medium text-[#9AA16A]">
+                          آشپزخانه کافه و رستوران ایوان · به‌زودی
+                        </p>
+                        <p className="mt-2 text-sm leading-7 text-[#57534E]">
+                          {category.comingSoonDescription}
+                        </p>
+                      </div>
+                      <a
+                        href={CAFE_INFO.instagramUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex shrink-0 items-center gap-2 self-start rounded-[10px] border border-[rgba(181,148,91,0.36)] bg-[#FFFFFF] px-4 py-2.5 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] sm:self-center"
+                      >
+                        <InstagramIcon className="h-4 w-4 text-[#6B7043]" />
+                        <span>اطلاع از رونمایی</span>
+                      </a>
                     </div>
-                    <a
-                      href={CAFE_INFO.instagramUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex shrink-0 items-center gap-2 self-start rounded-[10px] border border-[rgba(212,180,124,0.36)] bg-[#1A2842] px-4 py-2.5 text-xs font-medium text-[#F8F5EE] transition-colors hover:border-[#D4B47C] sm:self-center"
-                    >
-                      <InstagramIcon className="h-4 w-4 text-[#D4B47C]" />
-                      <span>اطلاع از رونمایی</span>
-                    </a>
-                  </div>
+                  </AnimatedContent>
                 ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {items.map((item) => {
-                      const hasDualBean =
-                        typeof item.priceBlend50 === 'number' &&
-                        typeof item.priceArabica100 === 'number';
-                      const isArabicaOnly =
-                        typeof item.priceBlend50 !== 'number' &&
-                        typeof item.priceArabica100 === 'number';
-                      const preferredBean = selectedBeans[item.id];
-
-                      return (
-                        <article
-                          key={item.id}
-                          className="group flex flex-col overflow-hidden rounded-[14px] border border-[rgba(244,241,234,0.1)] bg-[#131E33] transition-colors hover:border-[rgba(212,180,124,0.38)]"
-                        >
-                          {/* Top Row: Studio Eye-Level Photo + Name + Description */}
-                          <div className="flex gap-3.5 p-3.5">
-                            <button
-                              type="button"
-                              onClick={() => onSelectItemDetails(item)}
-                              aria-label={`مشاهده جزئیات ${item.name}`}
-                              className="h-24 w-24 shrink-0 overflow-hidden rounded-[10px] border border-[rgba(244,241,234,0.08)] bg-[#0E1525] sm:h-28 sm:w-28"
-                            >
-                              <img
-                                src={item.frontImage}
-                                alt={item.name}
-                                loading="lazy"
-                                decoding="async"
-                                referrerPolicy="no-referrer"
-                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                              />
-                            </button>
-
-                            <div className="flex min-w-0 flex-1 flex-col justify-between">
-                              <div>
-                                <div className="flex items-start justify-between gap-2">
-                                  <h3 className="text-base font-semibold leading-snug text-[#F8F5EE]">
-                                    {item.name}
-                                  </h3>
-                                  {item.highlight && (
-                                    <span className="shrink-0 text-[11px] font-medium text-[#9AA16A]">
-                                      {item.highlight}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="mt-1.5 line-clamp-2 text-xs leading-6 text-[#C4CCD8]">
-                                  {item.description}
-                                </p>
-                              </div>
-
-                              {/* Pricing Row (No Trailing Zeros) */}
-                              <div className="mt-2.5">
-                                {hasDualBean ? (
-                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                                    <span
-                                      className={`tabular-fa ${
-                                        preferredBean === 'arabica100'
-                                          ? 'text-[#A8B3C5]'
-                                          : 'font-semibold text-[#D4B47C]'
-                                      }`}
-                                    >
-                                      ۵۰/۵۰: {formatToman(item.priceBlend50!)}
-                                    </span>
-                                    <span
-                                      aria-hidden="true"
-                                      className="text-[#5B677B]"
-                                    >
-                                      ·
-                                    </span>
-                                    <span
-                                      className={`tabular-fa ${
-                                        preferredBean === 'arabica100'
-                                          ? 'font-semibold text-[#D4B47C]'
-                                          : 'text-[#DCE2EC]'
-                                      }`}
-                                    >
-                                      عربیکا: {formatToman(item.priceArabica100!)}
-                                    </span>
-                                  </div>
-                                ) : isArabicaOnly ? (
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="tabular-fa text-sm font-semibold text-[#D4B47C]">
-                                      {formatToman(item.priceArabica100!)}
-                                    </span>
-                                    <span className="text-[11px] text-[#9AA16A]">
-                                      ۱۰۰٪ عربیکا
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="tabular-fa text-sm font-semibold text-[#D4B47C]">
-                                    {formatToman(item.price ?? 0)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Card Footer Actions */}
-                          <div className="mt-auto flex items-center justify-between gap-2 border-t border-[rgba(244,241,234,0.08)] bg-[#10192B] px-3.5 py-2.5">
-                            <button
-                              type="button"
-                              onClick={() => onSelectItemDetails(item)}
-                              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#E7E2D8] transition-colors hover:text-[#D4B47C]"
-                            >
-                              <SlidersHorizontal
-                                className="h-3.5 w-3.5 text-[#D4B47C]"
-                                strokeWidth={1.6}
-                              />
-                              <span>
-                                {item.supportsSyrup
-                                  ? 'سیروپ و جزئیات'
-                                  : 'جزئیات محصول'}
-                              </span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => onInspectOnTable(item)}
-                              className="inline-flex items-center gap-1.5 text-xs text-[#A8B3C5] transition-colors hover:text-[#F8F5EE]"
-                            >
-                              <Disc className="h-3.5 w-3.5" strokeWidth={1.6} />
-                              <span>نمایش روی میز</span>
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })}
+                    {items.map((item, idx) => (
+                      <MenuItemCard
+                        key={item.id}
+                        item={item}
+                        preferredBean={selectedBeans[item.id]}
+                        delay={Math.min(idx * 0.05, 0.4)}
+                        eager={sectionIdx === 0 && idx < 3}
+                        onSelectItemDetails={handleSelectItemDetails}
+                        onInspectOnTable={handleInspectOnTable}
+                      />
+                    ))}
                   </div>
                 )}
               </section>

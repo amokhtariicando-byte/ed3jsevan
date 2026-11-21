@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F8F7F2" />
     <title>کافه و رستوران ایوان | منوی دیجیتال سه‌بعدی</title>
     <meta
       name="description"
@@ -15,14 +16,14 @@
     />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Relative hrefs on purpose: they resolve under the preview subpath
+         and at domain root alike (same bare-relative scheme the app uses
+         for images in menuData.ts). og:image + apple-touch-icon are
+         deferred — they need raster files. -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="manifest" href="manifest.webmanifest" />
   </head>
-  <body class="bg-[#0E1525] text-[#F4F1EA] antialiased selection:bg-[#AF894B]/30 selection:text-[#F4F1EA]">
+  <body class="bg-[#F8F7F2] text-[#2F321C] antialiased selection:bg-[#6B7043]/25 selection:text-[#2F321C]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -1,27 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  /* Official Eyvan Logo Brand Palette */
-  --eyvan-navy-deep: #0E1525;
-  --eyvan-navy-mid: #152238;
-  --eyvan-navy-logo: #293B5F;
-  --eyvan-gold: #AF894B;
-  --eyvan-gold-light: #D4B47C;
+  /* Official Eyvan Logo Brand Palette (light olive / cream) */
+  --eyvan-cream: #F8F7F2;
+  --eyvan-surface: #FFFFFF;
+  --eyvan-ink: #2F321C;
+  --eyvan-gold: #B5945B;
   --eyvan-olive: #6B7043;
+  --eyvan-olive-dark: #4F5330;
   --eyvan-olive-soft: #9AA16A;
-  --eyvan-cream: #F4F1EA;
+  --eyvan-sage: #E8EAD9;
   --eyvan-table-surface: #EFECE6;
-  --eyvan-text-secondary: #C4CCD8;
-  --eyvan-text-muted: #8B95A6;
-  --eyvan-border: rgba(244, 241, 234, 0.11);
+  --eyvan-text-secondary: #57534E;
+  --eyvan-text-muted: #78716C;
+  --eyvan-border: rgba(107, 112, 67, 0.12);
+
+  /* Motion tokens */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @layer base {
   html {
     direction: rtl;
     font-family: "Vazirmatn", system-ui, -apple-system, sans-serif;
-    background-color: var(--eyvan-navy-deep);
-    color: var(--eyvan-cream);
+    background-color: var(--eyvan-cream);
+    color: var(--eyvan-ink);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
@@ -29,9 +34,14 @@
 
   body {
     margin: 0;
+    /* 100dvh (with a 100vh fallback) tracks the mobile browser toolbar:
+       with plain 100vh the body is taller than the visible viewport while
+       the toolbar is shown, so the table view could scroll by the toolbar
+       height and jump when the toolbar hides/shows. */
     min-height: 100vh;
-    background-color: var(--eyvan-navy-deep);
-    color: var(--eyvan-cream);
+    min-height: 100dvh;
+    background-color: var(--eyvan-cream);
+    color: var(--eyvan-ink);
     overflow-x: hidden;
     letter-spacing: 0 !important;
   }
@@ -42,6 +52,20 @@
   select {
     font-family: inherit;
     letter-spacing: 0 !important;
+  }
+
+  /* Press feedback (AUDIT.md §3): subtle scale on :active, 160ms. The color
+     properties re-include what Tailwind's transition-colors provides, so hover
+     states keep working. */
+  button:not(.eyvan-stage-btn) {
+    transition:
+      transform 160ms var(--ease-out),
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+  button:not(.eyvan-stage-btn):active {
+    transform: scale(0.97);
   }
 }
 
@@ -84,20 +108,43 @@
   );
 }
 
-/* Subtle editorial fade-rise when switching active item */
-@keyframes eyvanTextIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .eyvan-card-img {
+    transform: scale(1.03);
   }
 }
 
+/* Single shared opacity-only fade (P2-9): the old eyvanTextIn / eyvanViewIn /
+   eyvanTableSwap keyframes were byte-identical, so all three classes use
+   this one. Opacity only, so rapid stepping doesn't flicker. */
+@keyframes eyvanFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .eyvan-text-enter {
-  animation: eyvanTextIn 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: eyvanFadeIn 200ms var(--ease-out) both;
+}
+
+/* True crossfade for the showcase item text (title, description, price):
+   the outgoing text fades out with a slight downward drift while the
+   incoming text fades in with a small rise, overlapping the wheel turn so
+   the swap reads as one gesture. The outgoing layer is unmounted by
+   CrossfadeText in App.tsx after 260ms — keep the out duration in sync. */
+@keyframes eyvanCrossfadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes eyvanCrossfadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(3px); }
+}
+
+.eyvan-crossfade-in {
+  animation: eyvanCrossfadeIn 300ms var(--ease-out) both;
+}
+.eyvan-crossfade-out {
+  animation: eyvanCrossfadeOut 250ms var(--ease-out) both;
 }
 
 /* Gentle organic hot steam wisps over hot beverages on the focal slot */
@@ -119,20 +166,55 @@
   animation: eyvanSteamFloat 3.4s ease-out infinite;
 }
 
-/* Eye-level front glass showcase rise when 3D camera tilts forward */
-@keyframes eyvanGlassRise {
-  from {
-    opacity: 0;
-    transform: translateY(28px) scale(0.92);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+/* Overlay motion system (plan 009) */
+.eyvan-overlay-backdrop {
+  transition: opacity 250ms ease-out;
+}
+.eyvan-overlay-backdrop[data-state='closed'] {
+  opacity: 0;
+}
+.eyvan-overlay-panel {
+  transition:
+    transform 300ms var(--ease-out),
+    opacity 300ms var(--ease-out);
+}
+.eyvan-overlay-panel[data-state='closed'] {
+  transition-duration: 200ms;
+  opacity: 0;
+}
+.eyvan-drawer-panel {
+  transition:
+    transform 300ms var(--ease-drawer),
+    opacity 300ms var(--ease-out);
+}
+.eyvan-drawer-panel[data-state='closed'] {
+  transform: translateX(100%);
+}
+.eyvan-sheet-panel[data-state='closed'] {
+  transform: translateY(100%);
+}
+.eyvan-modal-panel[data-state='closed'] {
+  transform: scale(0.95);
+}
+.eyvan-search-panel[data-state='closed'] {
+  transform: translateY(-12px);
 }
 
-.eyvan-glass-rise {
-  animation: eyvanGlassRise 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
+/* View + grid transitions (plan 010). The opacity-only fades share
+   eyvanFadeIn (defined above); only the card reveal keeps its own
+   keyframes because it also translates. */
+.eyvan-view-enter {
+  animation: eyvanFadeIn 250ms var(--ease-out) both;
+}
+@keyframes eyvanCardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.eyvan-card-enter {
+  animation: eyvanCardIn 250ms var(--ease-out) both;
+}
+.eyvan-table-swap {
+  animation: eyvanFadeIn 250ms var(--ease-out) both;
 }
 
 /* Clean scrollbars */
@@ -159,13 +241,203 @@
   display: none;
 }
 
+/* Splash / loading screen (from the Eyvan reference page) */
+@keyframes eyvanDrawArch {
+  0% { stroke-dashoffset: 420; opacity: 0.2; }
+  100% { stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes eyvanFloatSteam {
+  0%, 100% { transform: translateY(0); opacity: 0.65; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+@keyframes eyvanFadeUpIn {
+  0% { opacity: 0; transform: translateY(18px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes eyvanSoftPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.eyvan-draw-arch {
+  stroke-dasharray: 420;
+  animation: eyvanDrawArch 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.eyvan-splash-steam {
+  animation: eyvanFloatSteam 2.4s ease-in-out infinite;
+}
+.eyvan-fade-up {
+  animation: eyvanFadeUpIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.eyvan-soft-pulse {
+  animation: eyvanSoftPulse 2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .eyvan-text-enter,
-  .eyvan-steam-line,
-  .eyvan-glass-rise {
+  html {
+    scroll-behavior: auto;
+  }
+  .eyvan-steam-line {
     animation: none !important;
   }
-  .eyvan-rotary-motion {
+  .eyvan-draw-arch,
+  .eyvan-splash-steam,
+  .eyvan-fade-up,
+  .eyvan-soft-pulse {
+    animation: none !important;
+  }
+  .eyvan-showcase-panel {
+    transition-property: opacity !important;
+  }
+  .eyvan-crossfade-in,
+  .eyvan-crossfade-out {
+    animation: none !important;
+  }
+  .eyvan-plate-scale {
     transition-duration: 0.01ms !important;
+  }
+  /* P1-5: all 4 overlays stop sliding/scaling. The transition lives on the
+     shared .eyvan-overlay-panel (and .eyvan-drawer-panel re-declares its
+     own); the other variant classes only set the closed-state transform,
+     so all five panel classes are covered. The backdrop's opacity-only
+     fade is kept deliberately — a pure opacity change is not a vestibular
+     trigger, and an instant full-screen darkening flash would read worse;
+     same precedent as .eyvan-showcase-panel keeping opacity above, and as
+     the opacity-only eyvanFadeIn animations, which are also kept. */
+  .eyvan-overlay-panel,
+  .eyvan-drawer-panel,
+  .eyvan-sheet-panel,
+  .eyvan-modal-panel,
+  .eyvan-search-panel {
+    transition: none !important;
+  }
+  .eyvan-card-enter {
+    animation: none !important;
+  }
+}
+
+/* --- VibeFarsi design tokens, mapped to the Eyvan light palette --- */
+/* VibeFarsi components take their colors ONLY from these variables. Values
+   follow the Eyvan palette (primary = olive, background = cream, card =
+   white, accent = gold). The existing --eyvan-* tokens above stay untouched. */
+:root {
+  color-scheme: light;
+
+  --background: #F8F7F2;
+  --foreground: #2F321C;
+  --card: #FFFFFF;
+  --card-foreground: #2F321C;
+  --popover: #FFFFFF;
+  --popover-foreground: #2F321C;
+  --primary: #6B7043;
+  --primary-foreground: #FFFFFF;
+  --secondary: #E8EAD9;
+  --secondary-foreground: #2F321C;
+  --muted: #F2F1E9;
+  --muted-foreground: #78716C;
+  --accent: #E8EAD9;
+  --accent-foreground: #2F321C;
+  --destructive: #B3261E;
+  --success: #4F7A4F;
+  --warning: #B5945B;
+  --border: rgba(107, 112, 67, 0.14);
+  --input: rgba(107, 112, 67, 0.22);
+  --ring: #6B7043;
+  --brand: #B5945B;
+  --brand-foreground: #2F321C;
+
+  --radius: 0.625rem;
+  --type-display-weight: 700;
+  --type-display: "Vazirmatn", system-ui, sans-serif;
+  --type-body: "Vazirmatn", system-ui, sans-serif;
+  --shape-control: calc(var(--radius) - 2px);
+  --shape-field: calc(var(--radius) - 2px);
+  --shape-surface: calc(var(--radius) + 12px);
+  --shape-overlay: calc(var(--radius) + 4px);
+  --line: 1px;
+  --line-field: 1px;
+  --line-style: solid;
+  --field: #FFFFFF;
+  --depth-control: 0 1px 2px rgba(47, 50, 28, 0.06);
+  --depth-press: 0 0 #0000;
+  --depth-field: 0 0 #0000;
+  --depth-surface: 0 1px 2px rgba(47, 50, 28, 0.06);
+  --depth-overlay: 0 20px 50px -20px rgba(47, 50, 28, 0.35);
+  --surface-filter: none;
+  --press: scale(0.98);
+  --motion: 200ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  --backdrop: none;
+  --spacing: 0.25rem;
+}
+
+/* --- vibefarsi:tailwind-map (Eyvan values) --- */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --radius-control: var(--shape-control);
+  --radius-field: var(--shape-field);
+  --radius-surface: var(--shape-surface);
+  --radius-overlay: var(--shape-overlay);
+  --border-width-line: var(--line);
+  --border-width-line-field: var(--line-field);
+  --color-field: var(--field);
+  --shadow-control: var(--depth-control);
+  --shadow-press: var(--depth-press);
+  --shadow-field: var(--depth-field);
+  --shadow-surface: var(--depth-surface);
+  --shadow-overlay: var(--depth-overlay);
+  --ease-motion: var(--motion-ease);
+  --font-display: var(--type-display);
+  --font-sans: "Vazirmatn", system-ui, -apple-system, sans-serif;
+}
+
+/* VibeFarsi entrance/loading animations used by the vendored components. */
+@theme {
+  --animate-fade-up: vibefarsi-fade-up 200ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-slide-in: vibefarsi-slide-in 200ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-pulse-soft: vibefarsi-pulse-soft 1.6s ease-in-out infinite;
+  --animate-shine: vibefarsi-shine 1.4s ease-in-out infinite;
+
+  @keyframes vibefarsi-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes vibefarsi-slide-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes vibefarsi-pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @keyframes vibefarsi-shine {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
   }
 }

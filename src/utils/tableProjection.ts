@@ -19,6 +19,12 @@ export interface TableProjectionInput {
   tableScale: number;
   /** Camera pitch tilt in degrees: 0 = straight overhead, ~71 = eye-level front */
   pitchDeg: number;
+  /**
+   * Optional precomputed pitch trig. The pitch is constant across items
+   * within a frame, so per-frame callers pass this in to avoid recomputing
+   * sin/cos per item. When omitted, it is computed from pitchDeg.
+   */
+  pitchTrig?: { cosPitch: number; sinPitch: number };
   /** Current continuous turntable rotation angle in degrees */
   wheelAngleDeg: number;
   /** Static angular slot of this drink around the ring (0 = 12 o'clock, 180 = 6 o'clock) */
@@ -36,12 +42,6 @@ export interface ProjectedSeat {
   depthZ: number;
   /** Normalized depth in [-1, 1]: +1 is dead-front (6 o'clock), -1 is dead-back (12 o'clock) */
   frontness: number;
-  /** Subtle, natural optical depth-of-field blur in pixels (0 at front focus, gentle ~1.5px on sides, max ~4.2px at far rear) */
-  blurPx: number;
-  /** Subtle studio light falloff brightness multiplier (1.02 at front focus -> 0.78 at far rear) */
-  brightness: number;
-  /** Saturation multiplier for subtle atmospheric depth */
-  saturate: number;
   /** Painter's order z-index guaranteed strictly monotonic with depthZ */
   zIndex: number;
 }
@@ -58,6 +58,7 @@ export function projectTableSeat(input: TableProjectionInput): ProjectedSeat {
     ringRadiusPx,
     tableScale,
     pitchDeg,
+    pitchTrig,
     wheelAngleDeg,
     slotAngleDeg,
   } = input;
@@ -69,10 +70,13 @@ export function projectTableSeat(input: TableProjectionInput): ProjectedSeat {
   const localX = Math.sin(totalRad) * scaledR;
   const localY = -Math.cos(totalRad) * scaledR;
 
-  const pitchRad = (pitchDeg * Math.PI) / 180;
+  const cosPitch =
+    pitchTrig?.cosPitch ?? Math.cos((pitchDeg * Math.PI) / 180);
+  const sinPitch =
+    pitchTrig?.sinPitch ?? Math.sin((pitchDeg * Math.PI) / 180);
   const rotX = localX;
-  const rotY = localY * Math.cos(pitchRad);
-  const rotZ = localY * Math.sin(pitchRad);
+  const rotY = localY * cosPitch;
+  const rotZ = localY * sinPitch;
 
   const denom = Math.max(240, perspectivePx - rotZ);
   const perspScale = perspectivePx / denom;
@@ -83,18 +87,6 @@ export function projectTableSeat(input: TableProjectionInput): ProjectedSeat {
   // frontness = +1 when seat is at frontmost 6-o'clock rim (localY = +scaledR), -1 at 12-o'clock
   const frontness = scaledR > 0 ? Math.max(-1, Math.min(1, localY / scaledR)) : 1;
 
-  // Refined, subtle optical depth-of-field curve:
-  // - frontness >= 0.94 (focal seat dead front): crisp 0px blur
-  // - adjacent left/right seats (frontness ~0.65..0.8): light 1.2..1.7px softness (clearly recognizable, never smeared)
-  // - far rear rim (frontness ~ -1): gentle 4.2px bokeh
-  const focusGap = Math.max(0, 1 - frontness);
-  const blurPx =
-    focusGap < 0.04
-      ? 0
-      : Number(Math.min(4.2, Math.pow(focusGap, 0.78) * 2.45).toFixed(2));
-
-  const brightness = Number((1.02 - focusGap * 0.12).toFixed(3));
-  const saturate = Number((1.03 - focusGap * 0.08).toFixed(3));
   const zIndex = Math.round(rotZ + 2000);
 
   return {
@@ -103,9 +95,6 @@ export function projectTableSeat(input: TableProjectionInput): ProjectedSeat {
     perspScale,
     depthZ: rotZ,
     frontness,
-    blurPx,
-    brightness,
-    saturate,
     zIndex,
   };
 }
@@ -135,3 +124,69 @@ export function easeOutQuart(t: number): number {
   const clamped = Math.max(0, Math.min(1, t));
   return 1 - Math.pow(1 - clamped, 4);
 }
+
+/**
+ * Builds an easing function from a CSS cubic-bezier(x1, y1, x2, y2) curve.
+ * Solves x(t) = x with Newton-Raphson (bisection fallback) so the JS curve
+ * matches the CSS curve exactly. y1/y2 may exceed [0, 1] (overshoot), but
+ * x1/x2 must stay in [0, 1] for the curve to be a valid easing.
+ */
+function cubicBezierEasing(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): (t: number) => number {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const sampleX = (t: number): number => ((ax * t + bx) * t + cx) * t;
+  const sampleY = (t: number): number => ((ay * t + by) * t + cy) * t;
+  const sampleDerivativeX = (t: number): number =>
+    (3 * ax * t + 2 * bx) * t + cx;
+
+  function solveX(x: number): number {
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const err = sampleX(t) - x;
+      if (Math.abs(err) < 1e-6) return t;
+      const d = sampleDerivativeX(t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= err / d;
+    }
+    let lo = 0;
+    let hi = 1;
+    t = x;
+    while (hi - lo > 1e-6) {
+      if (sampleX(t) > x) hi = t;
+      else lo = t;
+      t = (lo + hi) / 2;
+    }
+    return t;
+  }
+
+  return (t: number): number => {
+    const clamped = Math.max(0, Math.min(1, t));
+    if (clamped === 0 || clamped === 1) return clamped;
+    return sampleY(solveX(clamped));
+  };
+}
+
+/**
+ * Soft ease-out for turntable spins and drag settles — the same curve as the
+ * CSS `--ease-drawer` token (cubic-bezier(0.32, 0.72, 0, 1)), so wheel motion
+ * shares one timing family with the rest of the app. Compared with
+ * easeOutQuart it starts at roughly half the initial velocity (no lurch when
+ * the wheel leaves rest) and glides into the slot on a long soft tail, while
+ * still moving visibly from the first frame so rapid stepping stays
+ * responsive. The zero end-slope means the wheel lands without a hard stop.
+ */
+export const easeSoftOut: (t: number) => number = cubicBezierEasing(
+  0.32,
+  0.72,
+  0,
+  1,
+);
