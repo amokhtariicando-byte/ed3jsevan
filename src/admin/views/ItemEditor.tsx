@@ -364,7 +364,7 @@ export function ItemEditorView({ itemId }: { itemId: string }) {
             </Field>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="ترکیب ۵۰/۵۰" htmlFor="item-price-blend">
+              <Field label="ترکیب ۵۰٪" htmlFor="item-price-blend">
                 <PriceInput
                   id="item-price-blend"
                   value={form.priceBlend50}

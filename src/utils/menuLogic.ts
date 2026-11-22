@@ -169,7 +169,7 @@ export function groupMenuForSimpleView(
 }
 
 export function getBeanLabel(bean: BeanType): string {
-  return bean === 'arabica100' ? '۱۰۰٪ عربیکا' : '۵۰٪/۵۰٪ ترکیب قهوه';
+  return bean === 'arabica100' ? '۱۰۰٪ عربیکا' : '۵۰٪ ترکیب قهوه';
 }
 
 export function getMilkTempLabel(temp: 'standard' | 'extra-hot'): string {

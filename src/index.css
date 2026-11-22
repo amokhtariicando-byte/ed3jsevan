@@ -31,6 +31,11 @@
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    /* Pinch-zoom off: pan-x pan-y lets the browser handle single-finger
+       scroll/swipe but blocks two-finger pinch-zoom (which the viewport
+       meta alone can't stop on iOS Safari). The stage sets its own tighter
+       touch-action (pan-y), which still wins there via intersection. */
+    touch-action: pan-x pan-y;
   }
 
   body {
@@ -57,7 +62,10 @@
 
   /* Press feedback (AUDIT.md §3): subtle scale on :active, 160ms. The color
      properties re-include what Tailwind's transition-colors provides, so hover
-     states keep working. */
+     states keep working. Do NOT add transition-* utilities to buttons: they
+     live in the utilities layer and override this base-layer transition,
+     which kills the :active scale animation (the overlay close buttons lost
+     their press feedback exactly this way). */
   button {
     touch-action: manipulation;
   }

@@ -46,16 +46,16 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
     closeTimerRef.current = window.setTimeout(onClose, 200);
   }, [onClose]);
 
+  // No programmatic focus on open: the keyboard must stay closed until the
+  // user taps the field — opening search shows the full list to pick from.
   useEffect(() => {
     if (!open) return;
     setQuery('');
-    const t = window.setTimeout(() => inputRef.current?.focus(), 60);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.clearTimeout(t);
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [open, handleClose]);
@@ -113,7 +113,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
             type="button"
             onClick={handleClose}
             aria-label="بستن جستجو"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-[#A8A29E] transition-colors hover:bg-[#FFFFFF] hover:text-[#2F321C]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-[#A8A29E] hover:bg-[#FFFFFF] hover:text-[#2F321C]"
           >
             <X className="h-4 w-4" strokeWidth={1.6} />
           </button>

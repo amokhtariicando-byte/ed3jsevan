@@ -113,7 +113,7 @@ export const UI_STRINGS: Record<Language, UiStrings> = {
     followLaunchInstagram: 'اطلاع از رونمایی در اینستاگرام',
     ofWord: 'از',
     priceNoZeros: 'قیمت بدون صفر',
-    blend5050: '۵۰٪/۵۰٪',
+    blend5050: '۵۰٪',
     arabica100: '۱۰۰٪ عربیکا',
     arabicaExclusive: 'سرو اختصاصی با ۱۰۰٪ عربیکا',
     arabicaExclusiveLong: 'سرو انحصاری با ۱۰۰٪ عربیکا',
@@ -129,7 +129,7 @@ export const UI_STRINGS: Record<Language, UiStrings> = {
     clickAnyDrink: 'روی هر نوشیدنی کلیک کنید',
     itemsOnTableSuffix: 'آیتم روی میز',
     selectCoffeeBean: 'انتخاب نوع دانه قهوه',
-    blend5050Full: 'ترکیب ۵۰٪/۵۰٪',
+    blend5050Full: 'ترکیب ۵۰٪',
     arabicaSpecialty: 'دانه ۱۰۰٪ عربیکا تخصصی',
     selectSyrup: 'انتخاب سیروپ طعم‌دار',
     optionalPlus: 'اختیاری · +',
@@ -195,7 +195,7 @@ export const UI_STRINGS: Record<Language, UiStrings> = {
     followLaunchInstagram: 'تابع الإطلاق على إنستغرام',
     ofWord: 'من',
     priceNoZeros: 'السعر بدون أصفار',
-    blend5050: '٥٠٪ / ٥٠٪',
+    blend5050: '٥٠٪',
     arabica100: '١٠٠٪ أرابيكا',
     arabicaExclusive: 'يُقدّم حصرياً بـ ١٠٠٪ أرابيكا',
     arabicaExclusiveLong: 'تقديم حصري بحبوب ١٠٠٪ أرابيكا',
@@ -211,7 +211,7 @@ export const UI_STRINGS: Record<Language, UiStrings> = {
     clickAnyDrink: 'اضغط على أي مشروب للاختيار',
     itemsOnTableSuffix: 'أصناف على الطاولة',
     selectCoffeeBean: 'اختر نوع حبوب القهوة',
-    blend5050Full: 'مزيج ٥٠٪ / ٥٠٪',
+    blend5050Full: 'مزيج ٥٠٪',
     arabicaSpecialty: 'حبوب ١٠٠٪ أرابيكا مختصة',
     selectSyrup: 'إضافة نكهة (سيروب)',
     optionalPlus: 'اختياري · +',
@@ -264,7 +264,7 @@ export const AR_CAFE_INFO = {
   brandName: 'إيوان',
   brandSubtitle: 'كافيه ومطعم',
   tagline:
-    'أجواء هادئة، قهوة مختصة بخيارين من الحبوب (٥٠/٥٠ أو ١٠٠٪ أرابيكا)، أعشاب إيرانية فاخرة، وقريباً مطبخ إيوان المتكامل',
+    'أجواء هادئة، قهوة مختصة بخيارين من الحبوب (٥٠٪ أو ١٠٠٪ أرابيكا)، أعشاب إيرانية فاخرة، وقريباً مطبخ إيوان المتكامل',
   hours: 'يومياً من ٩:٠٠ صباحاً حتى ١١:٣٠ مساءً',
   milkTempNote:
     'درجة حرارة الحليب القياسية بين ٦٠ و٧٠ درجة مئوية؛ يرجى إبلاغ النادل إذا كنت تفضّلها أكثر سخونة',
@@ -297,7 +297,7 @@ export const AR_CATEGORIES: Record<
     name: 'مشروبات القهوة الساخنة',
     shortName: 'قهوة ساخنة',
     subtitle:
-      'استخلاص دقيق بخيار حبوب ٥٠٪/٥٠٪ أو ١٠٠٪ أرابيكا مع إمكانية إضافة السيروب',
+      'استخلاص دقيق بخيار حبوب ٥٠٪ أو ١٠٠٪ أرابيكا مع إمكانية إضافة السيروب',
   },
   'hot-drinks': {
     name: 'المشروبات الساخنة',

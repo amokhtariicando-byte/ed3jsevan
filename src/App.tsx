@@ -9,7 +9,6 @@ import React, {
   useState,
 } from 'react';
 import {
-  ChevronLeft,
   ChevronRight,
   Clock,
   Disc,
@@ -398,7 +397,6 @@ export default function App() {
   );
 
   const lastKeyStepRef = useRef<number>(0);
-  const cardSwipeRef = useRef<{ x: number; y: number } | null>(null);
 
   const warmCategoryPlates = useCallback((catId: CategoryId) => {
     const mobile = typeof window !== 'undefined' && window.innerWidth < 1024;
@@ -808,6 +806,60 @@ export default function App() {
         </div>
       </header>
 
+      {/* Mobile Always-Visible Top Category Bar (directly below header — never hidden by mobile browser toolbars!).
+          Rendered at App ROOT level, OUTSIDE `.eyvan-view-enter` and `<main>`: a fixed
+          element nested inside the view-enter div (whose opacity animation makes it a
+          containing block) can be painted over by the footer mid-scroll — the header
+          and the view-switch overlay already live here for the same reason. */}
+      {viewMode === 'table' && (
+        <nav
+          aria-label="انتخاب دسته‌بندی منو در موبایل"
+          className="fixed inset-x-0 top-12 z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1 md:top-16 lg:hidden"
+        >
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setMobileCatsOpen(true)}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[rgba(181,148,91,0.55)] bg-[#6B7043] px-2.5 text-[11.5px] font-medium text-white whitespace-nowrap transition-colors hover:bg-[#4F5330]"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.8} />
+              <span>{t.categoriesBtn}</span>
+            </button>
+
+            <div className="eyvan-scroll-hidden flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+              {localizedCategories.map((category) => {
+                const isActive = category.id === activeCategoryId;
+                return (
+                  <button
+                    key={`mob-${category.id}`}
+                    ref={(el) => {
+                      mobileDockButtonsRef.current[category.id] = el;
+                    }}
+                    type="button"
+                    onPointerDown={() => warmCategoryPlates(category.id)}
+                    onMouseEnter={() => warmCategoryPlates(category.id)}
+                    onClick={() => handleSelectCategory(category.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[8px] px-2.5 text-[11.5px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
+                      isActive
+                        ? 'border border-[rgba(181,148,91,0.58)] bg-[#6B7043] text-white'
+                        : 'border border-transparent text-[#57534E] hover:bg-[#FFFFFF] hover:text-[#2F321C]'
+                    }`}
+                  >
+                    <span>{category.shortName}</span>
+                    {category.comingSoon && (
+                      <span className="text-[9.5px] font-normal text-[#6B7043]">
+                        {t.comingSoon}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </nav>
+      )}
+
       {/* Main Content: Either Rotary 3D Circular Table OR Classic Simple Menu */}
       <div key={viewMode} className="eyvan-view-enter">
         {viewMode === 'simple' ? (
@@ -829,54 +881,10 @@ export default function App() {
           </Suspense>
         </main>
       ) : (
-        <main className="relative h-[100dvh] min-h-[600px] w-full overflow-hidden">
-          {/* Mobile Always-Visible Top Category Bar (directly below header — never hidden by mobile browser toolbars!) */}
-          <nav
-            aria-label="انتخاب دسته‌بندی منو در موبایل"
-            className="fixed inset-x-0 top-12 z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1 md:top-16 lg:hidden"
-          >
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setMobileCatsOpen(true)}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[rgba(181,148,91,0.55)] bg-[#6B7043] px-2.5 text-[11.5px] font-medium text-white whitespace-nowrap transition-colors hover:bg-[#4F5330]"
-              >
-                <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.8} />
-                <span>{t.categoriesBtn}</span>
-              </button>
-
-              <div className="eyvan-scroll-hidden flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-                {localizedCategories.map((category) => {
-                  const isActive = category.id === activeCategoryId;
-                  return (
-                    <button
-                      key={`mob-${category.id}`}
-                      ref={(el) => {
-                        mobileDockButtonsRef.current[category.id] = el;
-                      }}
-                      type="button"
-                      onPointerDown={() => warmCategoryPlates(category.id)}
-                      onMouseEnter={() => warmCategoryPlates(category.id)}
-                      onClick={() => handleSelectCategory(category.id)}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[8px] px-2.5 text-[11.5px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
-                        isActive
-                          ? 'border border-[rgba(181,148,91,0.58)] bg-[#6B7043] text-white'
-                          : 'border border-transparent text-[#57534E] hover:bg-[#FFFFFF] hover:text-[#2F321C]'
-                      }`}
-                    >
-                      <span>{category.shortName}</span>
-                      {category.comingSoon && (
-                        <span className="text-[9.5px] font-normal text-[#6B7043]">
-                          {t.comingSoon}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </nav>
+        // 100svh (not dvh): the small viewport height is stable while the mobile
+        // browser toolbar shows/hides — with dvh the table height tracked the
+        // toolbar and the card jumped mid-scroll and on tab return.
+        <main className="relative h-[100svh] min-h-[600px] w-full overflow-hidden">
           {/* Layer 1: Giant Rotating Circular Marble Tabletop + 3D Forward Camera Tilt */}
           <RotaryTableStage
             category={activeCategory}
@@ -942,24 +950,9 @@ export default function App() {
                 : 'translate-y-0 opacity-100'
             }`}
           >
+            {/* No swipe handlers on the card: item-step swiping lives on the
+                table/stage drag only — the card swipe covered the whole display. */}
             <div
-              onTouchStart={(e) => {
-                if (overviewMode || activeCategory.comingSoon || categoryItems.length <= 1) return;
-                const touch = e.touches[0];
-                if (touch) cardSwipeRef.current = { x: touch.clientX, y: touch.clientY };
-              }}
-              onTouchEnd={(e) => {
-                const start = cardSwipeRef.current;
-                cardSwipeRef.current = null;
-                if (!start || overviewMode || activeCategory.comingSoon || categoryItems.length <= 1) return;
-                const touch = e.changedTouches[0];
-                if (!touch) return;
-                const dx = touch.clientX - start.x;
-                const dy = touch.clientY - start.y;
-                if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-                  handleStepItem(dx > 0 ? -1 : 1);
-                }
-              }}
               className={`pointer-events-auto w-full max-w-[460px] rounded-[18px] border border-[rgba(107,112,67,0.12)] bg-[#F8F7F2]/94 px-4 py-3.5 lg:max-w-[440px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 ${
                 overviewMode ? 'pointer-events-none' : ''
               }`}
@@ -983,14 +976,6 @@ export default function App() {
                         className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
                       >
                         <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setInfoOpen(true)}
-                        aria-label="مشخصات و نشانی کافه"
-                        className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#6B7043]"
-                      >
-                        <MapPin className="h-3.5 w-3.5" strokeWidth={1.7} />
                       </button>
                     </div>
                   </div>
@@ -1071,14 +1056,6 @@ export default function App() {
                         className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
                       >
                         <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setInfoOpen(true)}
-                        aria-label="مشخصات و نشانی کافه"
-                        className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#6B7043]"
-                      >
-                        <MapPin className="h-3.5 w-3.5" strokeWidth={1.7} />
                       </button>
                     </div>
                   </div>
@@ -1231,24 +1208,16 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Rotary Table Prev / Next Controls + Desktop Overview Trigger / Mobile Swipe Cue */}
+                  {/* Rotary Table Next Control (single right-side ">" button) + Desktop Overview Trigger */}
                   <div className="flex items-center justify-between gap-3 pt-0.5 lg:justify-start lg:gap-5 lg:pt-1">
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleStepItem(-1)}
-                        aria-label="نوشیدنی قبلی روی میز"
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(107,112,67,0.24)] bg-[#FFFFFF]/90 text-[#2F321C] transition-colors hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] lg:h-10 lg:w-10"
-                      >
-                        <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
-                      </button>
                       <button
                         type="button"
                         onClick={() => handleStepItem(1)}
                         aria-label="نوشیدنی بعدی روی میز"
                         className="flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(107,112,67,0.24)] bg-[#FFFFFF]/90 text-[#2F321C] transition-colors hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] lg:h-10 lg:w-10"
                       >
-                        <ChevronLeft className="h-4 w-4" strokeWidth={1.8} />
+                        <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
                       </button>
                     </div>
 
@@ -1339,14 +1308,15 @@ export default function App() {
         )}
       </div>
 
-      {/* Grounded Editorial Footer (Official Eyvan Logo, Hours, Location, Cashier Note & Instagram) */}
+      {/* Grounded Editorial Footer (Official Eyvan Logo, Hours, Location, Cashier Note & Instagram).
+          No content-visibility here: the old `auto 320px` estimate (real height ~500px)
+          jumped the page height when the footer scrolled into view. */}
       <footer
-        className={`relative z-20 border-t border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] px-5 pt-12 sm:px-8 lg:px-12 ${
-          viewMode === 'table' ? 'pb-24' : 'pb-12'
+        className={`relative z-20 border-t border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] px-5 pt-8 sm:px-8 lg:px-12 lg:pt-12 ${
+          viewMode === 'table' ? 'pb-10 lg:pb-24' : 'pb-12'
         }`}
-        style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' }}
       >
-        <div className="mx-auto flex max-w-[1320px] flex-col gap-8 md:flex-row md:items-start md:justify-between">
+        <div className="mx-auto flex max-w-[1320px] flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-8">
           <div className="flex flex-col items-start gap-3">
             <EyvanLogo
               variant="full"
@@ -1361,7 +1331,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 text-xs text-[#57534E] sm:grid-cols-2 sm:gap-10">
+          <div className="grid grid-cols-1 gap-4 text-xs text-[#57534E] sm:grid-cols-2 sm:gap-10">
             <div className="space-y-3">
               <p className="text-sm font-medium text-[#2F321C]">
                 {t.infoAndHours}

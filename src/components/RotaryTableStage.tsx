@@ -503,12 +503,14 @@ export const RotaryTableStage = memo(function RotaryTableStage({
         const nextW = window.innerWidth;
         const nextH = window.innerHeight;
         setViewport((prev) => {
-          // On mobile, browser address-bar show/hide changes height by ~56-100px
-          // without changing width; ignoring those prevents vertical table jumps during scroll.
+          // On mobile, browser chrome show/hide (address bar + bottom nav bar)
+          // changes height by ~56-150px without changing width — including when
+          // returning to the tab from another app. Ignoring those prevents
+          // vertical table jumps during scroll and on tab return.
           if (
             nextW < 1024 &&
             nextW === prev.width &&
-            Math.abs(nextH - prev.height) < 120
+            Math.abs(nextH - prev.height) < 200
           ) {
             return prev;
           }

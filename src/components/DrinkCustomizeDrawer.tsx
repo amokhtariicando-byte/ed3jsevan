@@ -115,7 +115,7 @@ export const DrinkCustomizeDrawer: React.FC<DrinkCustomizeDrawerProps> = ({
             type="button"
             onClick={handleClose}
             aria-label="بستن جزئیات محصول"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.12)] bg-[#FFFFFF] text-[#2F321C] transition-colors hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043]"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.12)] bg-[#FFFFFF] text-[#2F321C] hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043]"
           >
             <X className="h-4 w-4" strokeWidth={1.6} />
           </button>
@@ -314,14 +314,6 @@ export const DrinkCustomizeDrawer: React.FC<DrinkCustomizeDrawerProps> = ({
               {formatPrice(unitPrice)}
             </span>
           </div>
-
-          <button
-            type="button"
-            onClick={handleClose}
-            className="mt-3.5 w-full rounded-[10px] border border-[rgba(181,148,91,0.42)] bg-[#FFFFFF] px-4 py-2.5 text-sm font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9]"
-          >
-            {t.closeDetails}
-          </button>
 
           <p className="mt-2.5 text-center text-[11px] text-[#78716C]">
             {cafeInfo.paymentNote}

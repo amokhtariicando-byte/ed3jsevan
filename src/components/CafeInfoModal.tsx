@@ -85,7 +85,7 @@ export const CafeInfoModal: React.FC<CafeInfoModalProps> = ({
             type="button"
             onClick={handleClose}
             aria-label="بستن پنجره مشخصات کافه"
-            className="flex h-10 w-10 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.12)] text-[#78716C] transition-colors hover:border-[#B5945B] hover:text-[#2F321C]"
+            className="flex h-10 w-10 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.12)] text-[#78716C] hover:border-[#B5945B] hover:text-[#2F321C]"
           >
             <X className="h-4 w-4" strokeWidth={1.5} />
           </button>

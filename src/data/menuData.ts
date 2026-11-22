@@ -87,7 +87,7 @@ export const SYRUP_OPTIONS: SyrupOption[] = [
 export const CAFE_INFO = {
   brandName: 'ایوان',
   brandSubtitle: 'کافه و رستوران',
-  tagline: 'فضای آرام، قهوه تخصصی با دو انتخاب دانه ۵۰/۵۰ و ۱۰۰٪ عربیکا، دمنوش‌های ایرانی و به‌زودی آشپزخانه کامل ایوان',
+  tagline: 'فضای آرام، قهوه تخصصی با دو انتخاب دانه ۵۰٪ و ۱۰۰٪ عربیکا، دمنوش‌های ایرانی و به‌زودی آشپزخانه کامل ایوان',
   instagramHandle: '@cafeeyvan_',
   instagramUrl:
     'https://www.instagram.com/cafeeyvan_?hvrq=MWRhczU0c3d6aWhiZw==',
@@ -182,7 +182,7 @@ export const MENU_CATEGORIES: MenuCategory[] = [
     id: 'hot-coffee',
     name: 'نوشیدنی‌های گرم بر پایه قهوه',
     shortName: 'قهوه گرم',
-    subtitle: 'عصاره‌گیری دقیق با انتخاب دانه ۵۰٪/۵۰٪ یا ۱۰۰٪ عربیکا و امکان افزودن سیروپ',
+    subtitle: 'عصاره‌گیری دقیق با انتخاب دانه ۵۰٪ یا ۱۰۰٪ عربیکا و امکان افزودن سیروپ',
     defaultTone: 'navy',
     isHotCategory: true,
   },

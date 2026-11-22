@@ -288,20 +288,9 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   return (
     <div className="min-h-screen bg-[#F8F7F2] pt-20 pb-14 text-[#2F321C]">
       <div className="mx-auto max-w-[1320px] px-4 sm:px-6 lg:px-10">
-        {/* Top Heading + Search Bar */}
-        <div className="flex flex-col gap-5 border-b border-[rgba(107,112,67,0.1)] pb-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-medium text-[#6B7043]">
-              {t.simpleMenuEyebrow}
-            </p>
-            <h1 className="mt-1.5 text-2xl font-semibold text-[#2F321C] sm:text-3xl">
-              {t.simpleMenuHeading}
-            </h1>
-            <p className="mt-1.5 text-xs leading-6 text-[#78716C] sm:text-sm">
-              {cafeInfo.paymentNote} · {t.simpleMenuSubPrefix}
-            </p>
-          </div>
-
+        {/* Search Bar (compact header: the eyebrow + big title + payment note
+            were removed — the payment note already lives in the page footer) */}
+        <div className="border-b border-[rgba(107,112,67,0.1)] pb-4">
           <div className="relative w-full lg:max-w-[360px]">
             <Search
               className="pointer-events-none absolute top-1/2 right-3.5 h-4 w-4 -translate-y-1/2 text-[#6B7043]"

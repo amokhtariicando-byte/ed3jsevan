@@ -97,7 +97,7 @@ export const MobileCategorySheet: React.FC<MobileCategorySheetProps> = ({
             type="button"
             onClick={handleClose}
             aria-label="بستن فهرست دسته‌بندی‌ها"
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.14)] bg-[#FFFFFF] text-[#2F321C] transition-colors hover:border-[#B5945B]"
+            className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[rgba(107,112,67,0.14)] bg-[#FFFFFF] text-[#2F321C] hover:border-[#B5945B]"
           >
             <X className="h-4 w-4" strokeWidth={1.7} />
           </button>
