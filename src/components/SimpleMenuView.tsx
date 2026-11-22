@@ -329,7 +329,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
         </div>
 
         {/* Sticky Category Filter Bar (Desktop full strip + Mobile pinned Categories Sheet trigger) */}
-        <div className="sticky top-16 z-20 -mx-4 border-b border-[rgba(107,112,67,0.09)] bg-[#F8F7F2]/97 px-4 py-3 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
+        <div className="sticky top-12 z-20 -mx-4 border-b border-[rgba(107,112,67,0.09)] bg-[#F8F7F2]/97 px-4 py-3 sm:-mx-6 sm:px-6 md:top-16 lg:-mx-10 lg:px-10">
           <div className="flex items-center gap-2">
             {/* Pinned Mobile Category Sheet Trigger */}
             <button

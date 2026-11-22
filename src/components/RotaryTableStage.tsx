@@ -1478,17 +1478,19 @@ export const RotaryTableStage = memo(function RotaryTableStage({
                   );
                   const isActive = idx === activeIndex;
                   const isHovered = overviewMode && hoveredOverviewIndex === idx;
+                  // Plates keep a constant scale in table mode: the
+                  // projection's per-frame perspective scale already grows
+                  // plates as they travel to the front focal seat and
+                  // shrinks them as they recede. The old binary
+                  // active/inactive scale (1.16 vs 0.86 on mobile) pulsed
+                  // every plate ±15–35% on each item step — the "menu
+                  // scales up/down" jump reported on phones. Overview mode
+                  // keeps its hover emphasis.
                   const plateScale = overviewMode
                     ? isHovered
                       ? 1.16
                       : 0.98
-                    : isActive
-                      ? isMobile
-                        ? 1.16
-                        : 1.32
-                      : isMobile
-                        ? 0.86
-                        : 0.88;
+                    : 1;
                   const isBroken = Boolean(brokenImages[item.id]);
 
                   return (

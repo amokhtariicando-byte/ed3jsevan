@@ -94,11 +94,13 @@ function scrollToTopInstant(): void {
 }
 
 /**
- * How long (ms) the outgoing text layer stays mounted after an item change.
- * Must stay in sync with `.eyvan-crossfade-out` in index.css (250ms) plus a
- * small margin, so the layer unmounts only after its fade has finished.
+ * How long (ms) the old text fades out before the new text fades in.
+ * Must stay in sync with `.eyvan-crossfade-out` in index.css (140ms).
+ * The swap is sequential — old out, then new in — so old and new text are
+ * never visible at the same time (the previous overlapping crossfade read
+ * as garbled double text on phones).
  */
-const CROSSFADE_OUT_MS = 260;
+const CROSSFADE_OUT_MS = 140;
 
 /**
  * Resize debounce for the category-dock centering listener (P2-5), matching
@@ -125,71 +127,86 @@ const SPLASH_HOLD_MS = 500;
 const SPLASH_FADE_MS = 400;
 
 /**
- * True crossfade for a single text spot (title, description, or price) when
- * the active item changes: the previous text fades out with a slight
- * downward drift while the new text fades in with a small rise, overlapping
- * the wheel turn so the swap reads as one gesture.
+ * Sequential text swap for a single text spot (title, description, or price)
+ * when the active item changes: the previous text fades out first (140ms),
+ * then the new text fades in (220ms). The two are never on screen together,
+ * so the swap can never read as overlapping / garbled double text.
  *
- * Rapid-step safe: only ONE outgoing layer ever exists — each new change
- * replaces it with the latest previous text and restarts the unmount timer,
- * so hammering next/prev can never stack stale or duplicated text. Content
- * changes that don't change `itemKey` (e.g. the price updating on a bean
- * switch) swap instantly with no crossfade. Under prefers-reduced-motion no
- * outgoing layer is rendered at all (instant swap; the CSS animations are
- * neutralized in index.css too).
+ * Rapid-step safe: each new change restarts the fade-out from whatever is
+ * currently displayed and re-arms the timer, so hammering next/prev can
+ * never stack stale text — intermediate items are skipped and only the
+ * latest text fades in. Content changes that don't change `itemKey` (e.g.
+ * the price updating on a bean switch) swap instantly with no animation.
+ * Under prefers-reduced-motion (or on lite devices) the swap is instant;
+ * the CSS animations are neutralized in index.css too.
  *
- * The outgoing layer is absolutely positioned over the incoming one and is
- * aria-hidden + pointer-events-none, so it never affects layout, focus, or
- * screen readers. Only ever wrap plain text — never interactive controls.
+ * Only ever wrap plain text — never interactive controls.
  */
 function CrossfadeText({
   itemKey,
   children,
+  className,
 }: {
   itemKey: string;
   children: React.ReactNode;
+  className?: string;
 }) {
-  const [outgoing, setOutgoing] = useState<{
+  const [display, setDisplay] = useState<{
     key: string;
     node: React.ReactNode;
-  } | null>(null);
-  const lastRef = useRef({ key: itemKey, node: children });
+    phase: 'in' | 'out';
+  }>({ key: itemKey, node: children, phase: 'in' });
+  const lastKeyRef = useRef(itemKey);
   const latestChildrenRef = useRef(children);
   latestChildrenRef.current = children;
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const prev = lastRef.current;
-    lastRef.current = { key: itemKey, node: latestChildrenRef.current };
-    if (prev.key === itemKey) return;
+    if (lastKeyRef.current === itemKey) return;
+    lastKeyRef.current = itemKey;
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     if (prefersReducedMotion() || !getDeviceProfile().enableCrossfade) {
-      setOutgoing(null);
+      setDisplay({
+        key: itemKey,
+        node: latestChildrenRef.current,
+        phase: 'in',
+      });
       return;
     }
-    setOutgoing({ key: prev.key, node: prev.node });
+    // Phase 1: fade out whatever is currently displayed.
+    setDisplay((prev) => ({ key: prev.key, node: prev.node, phase: 'out' }));
+    // Phase 2: after the fade-out, fade the new text in.
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      setDisplay({
+        key: itemKey,
+        node: latestChildrenRef.current,
+        phase: 'in',
+      });
+    }, CROSSFADE_OUT_MS);
   }, [itemKey]);
 
-  useEffect(() => {
-    if (!outgoing) return;
-    const timer = window.setTimeout(
-      () => setOutgoing(null),
-      CROSSFADE_OUT_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [outgoing]);
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   return (
-    <div className="relative">
-      {outgoing && (
-        <div
-          key={outgoing.key}
-          aria-hidden="true"
-          className="eyvan-crossfade-out pointer-events-none absolute inset-0"
-        >
-          {outgoing.node}
-        </div>
-      )}
-      <div key={itemKey} className="eyvan-crossfade-in relative">
-        {children}
+    <div className={`relative ${className ?? ''}`}>
+      <div
+        key={`${display.key}-${display.phase}`}
+        className={
+          display.phase === 'out'
+            ? 'eyvan-crossfade-out'
+            : 'eyvan-crossfade-in'
+        }
+      >
+        {display.node}
       </div>
     </div>
   );
@@ -690,8 +707,8 @@ export default function App() {
       it has mounted. */}
       {viewLoading && <SplashScreen compact />}
       {/* Top Bar — 3-Zone Editorial Header (Official Eyvan Logo · Clean Links · Simple Menu / Rotary Table Toggle) */}
-      <header className="fixed inset-x-0 top-0 z-30 h-14 border-b border-[rgba(107,112,67,0.1)] bg-[#FFFFFF]/96 md:h-16 lg:bg-[#FFFFFF]/96">
-        <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
+      <header className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[rgba(107,112,67,0.1)] bg-[#FFFFFF]/96 md:h-16 lg:bg-[#FFFFFF]/96">
+        <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-10">
           {/* Zone 1: Official Eyvan Brand Mark */}
           <button
             type="button"
@@ -759,7 +776,7 @@ export default function App() {
               type="button"
               onClick={toggleLang}
               aria-label={t.switchLangAria}
-              className="inline-flex items-center gap-1.5 rounded-[10px] border border-[rgba(107,112,67,0.2)] bg-[#F8F7F2] px-2.5 py-2 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap shrink-0 sm:px-3"
+              className="inline-flex h-10 items-center gap-1.5 rounded-[10px] border border-[rgba(107,112,67,0.2)] bg-[#F8F7F2] px-2.5 py-1.5 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap shrink-0 sm:px-3"
             >
               <Globe className="h-3.5 w-3.5 text-[#6B7043]" strokeWidth={1.7} />
               <span>{t.langShort}</span>
@@ -767,7 +784,7 @@ export default function App() {
             <button
               type="button"
               onClick={handleToggleViewMode}
-              className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(181,148,91,0.44)] bg-[#FFFFFF]/95 px-3.5 py-2 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap shrink-0 sm:px-4 sm:text-sm"
+              className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-[rgba(181,148,91,0.44)] bg-[#FFFFFF]/95 px-2.5 py-1.5 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap shrink-0 sm:px-4 sm:text-sm"
             >
               {viewMode === 'table' ? (
                 <>
@@ -816,7 +833,7 @@ export default function App() {
           {/* Mobile Always-Visible Top Category Bar (directly below header — never hidden by mobile browser toolbars!) */}
           <nav
             aria-label="انتخاب دسته‌بندی منو در موبایل"
-            className="fixed inset-x-0 top-[56px] z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1.5 md:top-16 lg:hidden"
+            className="fixed inset-x-0 top-12 z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1 md:top-16 lg:hidden"
           >
             <div className="flex items-center gap-1.5">
               <button
@@ -1074,7 +1091,12 @@ export default function App() {
                   </CrossfadeText>
 
                   {/* Bright, Scannable Tasting Description (crossfades with the wheel turn) */}
-                  <CrossfadeText itemKey={activeItem.id}>
+                  {/* Fixed 2-line height so the card never jumps when the new
+                      description wraps to a different line count. */}
+                  <CrossfadeText
+                    itemKey={activeItem.id}
+                    className="min-h-10 lg:min-h-14"
+                  >
                     <p className="line-clamp-2 text-[13px] leading-5 text-[#57534E] lg:line-clamp-none lg:text-[15px] lg:leading-7">
                       {activeItem.description}
                     </p>
@@ -1188,17 +1210,26 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Official Printed Milk Temperature Notice on Hot Bar */}
-                  {activeCategory.isHotCategory &&
-                    activeItem.supportsMilkTemp && (
-                      <p className="flex items-start gap-2 text-[11px] leading-5 text-[#78716C]">
-                        <Thermometer
-                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B7043]"
-                          strokeWidth={1.6}
-                        />
-                        <span>{cafeInfo.milkTempNote}</span>
-                      </p>
-                    )}
+                  {/* Official Printed Milk Temperature Notice on Hot Bar.
+                      Always mounted with a grid-rows collapse so switching
+                      between milk-temp and non-milk-temp items animates the
+                      card height instead of snapping it (no layout jump). */}
+                  <div
+                    className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+                      activeCategory.isHotCategory &&
+                      activeItem.supportsMilkTemp
+                        ? 'grid-rows-[1fr]'
+                        : 'grid-rows-[0fr]'
+                    }`}
+                  >
+                    <p className="flex min-h-0 items-start gap-2 overflow-hidden text-[11px] leading-5 text-[#78716C]">
+                      <Thermometer
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B7043]"
+                        strokeWidth={1.6}
+                      />
+                      <span>{cafeInfo.milkTempNote}</span>
+                    </p>
+                  </div>
 
                   {/* Rotary Table Prev / Next Controls + Desktop Overview Trigger / Mobile Swipe Cue */}
                   <div className="flex items-center justify-between gap-3 pt-0.5 lg:justify-start lg:gap-5 lg:pt-1">

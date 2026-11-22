@@ -150,11 +150,14 @@
   to { opacity: 0; transform: translateY(3px); }
 }
 
+/* Sequential text swap (CrossfadeText in App.tsx): old fades out first,
+   then new fades in — the two are never on screen together. The out
+   duration must stay in sync with CROSSFADE_OUT_MS in App.tsx. */
 .eyvan-crossfade-in {
-  animation: eyvanCrossfadeIn 300ms var(--ease-out) both;
+  animation: eyvanCrossfadeIn 220ms var(--ease-out) both;
 }
 .eyvan-crossfade-out {
-  animation: eyvanCrossfadeOut 250ms var(--ease-out) both;
+  animation: eyvanCrossfadeOut 140ms var(--ease-out) both;
 }
 
 /* Gentle organic hot steam wisps over hot beverages on the focal slot */
