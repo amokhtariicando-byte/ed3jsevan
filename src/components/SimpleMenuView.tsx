@@ -283,7 +283,7 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t.simpleSearchPlaceholder}
-              aria-label="جستجو در منوی ساده"
+              aria-label="جستجو در منو"
               className="w-full rounded-[10px] border border-[rgba(107,112,67,0.14)] bg-[#FFFFFF] py-2.5 pr-10 pl-9 text-sm text-[#2F321C] placeholder:text-[#A8A29E] focus:border-[#B5945B] focus:outline-none"
             />
             {searchQuery && (
