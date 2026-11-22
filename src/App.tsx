@@ -15,7 +15,6 @@ import {
   Eye,
   Globe,
   LayoutGrid,
-  List,
   MapPin,
   RotateCcw,
   Search,
@@ -73,20 +72,13 @@ const AdminApp = lazy(() =>
   import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })),
 );
 
-type ViewMode = 'table' | 'simple';
-
-
-
 /**
  * Jump to the top of the page synchronously, with no animation.
  * `behavior: 'instant'` (not 'auto') is required: index.css sets
  * `scroll-behavior: smooth` on <html>, so 'auto' would still animate.
- * Call BEFORE switching views — a smooth scroll started at the switch races
- * the content swap and the browser's scroll anchoring: the table page is
- * short (100dvh + footer) and the simple menu is very tall, so when the tall
- * menu mounts, anchoring tries to keep the visible footer in place and drags
- * the viewport to the end of the page for a moment. Instant is also the
- * reduced-motion-friendly choice (no animation at all).
+ * Used by the logo button (back to the hero) and by «نمایش روی میز» /
+ * search selection (jump to the hero + select the item). Instant is also
+ * the reduced-motion-friendly choice (no animation at all).
  */
 function scrollToTopInstant(): void {
   window.scrollTo({ top: 0, behavior: 'instant' });
@@ -215,13 +207,18 @@ function CrossfadeText({
  * Isolated zero-App-rerender background tone crossfade layer.
  * Uses direct DOM style writes on two layers so changing backdrop tone
  * never triggers the 4x cascading re-render on the 1300-line App tree.
+ * The layer lives INSIDE the hero <main> (absolute inset-0, first child):
+ * it tints only the hero — the list section below has its own solid cream
+ * background. It must NOT be fixed/root-level: a fixed overlay would paint
+ * above the in-flow list content during its 400ms fade. No -z-10 here:
+ * inside <main> (no stacking context) a negative z-index would drop the
+ * layer behind the root div's background; as the first positioned child,
+ * all hero content (stage, scrims, showcase, bars) paints above it.
  */
 const BackdropToneLayer = memo(function BackdropToneLayer({
   hex,
-  active,
 }: {
   hex: string;
-  active: boolean;
 }) {
   const baseRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -231,13 +228,6 @@ const BackdropToneLayer = memo(function BackdropToneLayer({
     const baseEl = baseRef.current;
     const overlayEl = overlayRef.current;
     if (!baseEl || !overlayEl) return;
-
-    if (!active) {
-      committedHexRef.current = hex;
-      baseEl.style.backgroundColor = hex;
-      overlayEl.style.opacity = '0';
-      return;
-    }
 
     if (hex === committedHexRef.current) return;
 
@@ -263,24 +253,22 @@ const BackdropToneLayer = memo(function BackdropToneLayer({
       window.cancelAnimationFrame(raf2);
       window.clearTimeout(timer);
     };
-  }, [hex, active]);
+  }, [hex]);
 
   return (
     <>
       <div
         ref={baseRef}
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 -z-10"
+        className="pointer-events-none absolute inset-0"
         style={{ backgroundColor: committedHexRef.current }}
       />
-      {active && (
-        <div
-          ref={overlayRef}
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 transition-opacity duration-400 ease-out"
-          style={{ opacity: 0 }}
-        />
-      )}
+      <div
+        ref={overlayRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 transition-opacity duration-400 ease-out"
+        style={{ opacity: 0 }}
+      />
     </>
   );
 });
@@ -288,7 +276,6 @@ const BackdropToneLayer = memo(function BackdropToneLayer({
 export default function App() {
   const { lang, toggleLang, t, cafeInfo, formatDigits, formatPrice } = useLanguage();
   const deviceProfile = getDeviceProfile();
-  const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [activeCategoryId, setActiveCategoryId] =
     useState<CategoryId>('hot-coffee');
   const [simpleCategoryId, setSimpleCategoryId] = useState<CategoryId | 'all'>(
@@ -301,22 +288,23 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [infoOpen, setInfoOpen] = useState<boolean>(false);
   const [mobileCatsOpen, setMobileCatsOpen] = useState<boolean>(false);
+  // Which list the shared mobile category sheet filters: the hero table's
+  // category (opened from the hero bar) or the list section's filter
+  // (opened from the list). The sheet reads/writes the matching state.
+  const [mobileCatsContext, setMobileCatsContext] = useState<'table' | 'list'>(
+    'table',
+  );
+  // The list section below the hero mounts (lazy chunk + 67 cards) only
+  // when the user scrolls near it, so the first paint stays light. Once
+  // mounted it never unmounts — filter and scroll state are preserved.
+  const listSectionRef = useRef<HTMLElement | null>(null);
+  const [listInView, setListInView] = useState<boolean>(false);
   const [splash, setSplash] = useState<'show' | 'leaving' | 'gone'>(
     // Reduced motion skips the splash from the very first render — deciding
     // here (not in a useEffect) means reduced-motion users never see even a
     // 1-frame splash flash.
     () => (prefersReducedMotion() ? 'gone' : 'show'),
   );
-  // Explicit view-switch loading flag. The simple menu's chunk is lazy, and
-  // the Suspense fallback alone cannot cover the load gap: it renders
-  // inside the `.eyvan-view-enter` div, whose opacity animation (0→1) makes
-  // it the containing block for the fixed fallback, so the fallback is
-  // positioned relative to the ~0-height view div and effectively
-  // invisible — the collapsed page (header + footer) shows crisply for ~1s
-  // on a slow mobile connection. The overlay below renders at App root
-  // level instead, is set synchronously in the switch handler, and lifts
-  // only when the new view reports it has mounted.
-  const [viewLoading, setViewLoading] = useState<boolean>(false);
 
   // Splash screen: show the arch logo for SPLASH_HOLD_MS, then fade out
   // over SPLASH_FADE_MS. Reduced motion is already 'gone' via the initial
@@ -333,8 +321,8 @@ export default function App() {
       window.clearTimeout(t2);
     };
   }, []);
-  // Preload the simple-menu chunk when the browser is idle after first
-  // paint, so switching to «منوی ساده» is instant on repeat visits. Only
+  // Preload the list-section chunk when the browser is idle after first
+  // paint, so scrolling down to the list is instant on repeat visits. Only
   // this chunk — never the admin chunk. The cast keeps TypeScript from
   // narrowing `window` to `never` in the fallback branch: lib.dom declares
   // requestIdleCallback as always present, but Safari doesn't implement it.
@@ -342,7 +330,7 @@ export default function App() {
     if (!deviceProfile.allowIdlePreload) return;
     const preload = () => {
       import('./components/SimpleMenuView').catch(() => {
-        // A failed preload is simply retried when the user switches views.
+        // A failed preload is simply retried when the list mounts.
       });
     };
     const idle = window as unknown as {
@@ -359,20 +347,30 @@ export default function App() {
     const timer = window.setTimeout(preload, 1200);
     return () => window.clearTimeout(timer);
   }, []);
-  // Safety net for the view-loading overlay: never leave it up forever if
-  // the chunk import hangs (it normally resolves in well under a second),
-  // and lift it immediately if the view flips back to the table before the
-  // menu mounts (only reachable by keyboard while the overlay is up — the
-  // overlay itself blocks pointer taps).
+  // Mount the list section the moment its top edge enters the viewport.
+  // The -1px bottom rootMargin keeps it from firing on load: the hero is
+  // exactly 100svh, so the section top sits precisely on the viewport's
+  // bottom edge, and sub-pixel rounding could otherwise mount it early.
+  // Once mounted it stays mounted (observer disconnects on first hit).
   useEffect(() => {
-    if (!viewLoading) return;
-    if (viewMode === 'table') {
-      setViewLoading(false);
+    const el = listSectionRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setListInView(true);
       return;
     }
-    const timer = window.setTimeout(() => setViewLoading(false), 10000);
-    return () => window.clearTimeout(timer);
-  }, [viewMode, viewLoading]);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setListInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '0px 0px -1px 0px', threshold: 0 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   // Admin panel: `#/admin` (and any `#/admin/...` route) renders the admin
   // app instead of the customer menu. The admin bundle stays lazy-loaded.
   const [isAdmin, setIsAdmin] = useState<boolean>(
@@ -444,36 +442,30 @@ export default function App() {
     : 0;
 
   const backdropHex = useMemo(() => {
-    if (viewMode === 'simple') return '#F8F7F2';
     const tone = activeItem?.backdropTone ?? activeCategory.defaultTone;
     return getBackdropHex(tone);
-  }, [viewMode, activeItem, activeCategory.defaultTone]);
+  }, [activeItem, activeCategory.defaultTone]);
 
   // Background tone crossfade (P1-6). The root div used to animate
   // `background-color` over 400ms on every tone-changing item step — a
   // full-viewport repaint for the whole duration. Instead the committed
-  // tone sits on the root with NO transition, and tone changes crossfade
-  // through an opacity-only overlay layer (compositor-only, no repaint):
-  // the overlay fades in with the new tone, then the tone commits to the
-  // root and the overlay hides (its fade-out is invisible — the same color
-  // is underneath by then).
+  // tone sits on the hero's base layer with NO transition, and tone changes
+  // crossfade through an opacity-only overlay layer (compositor-only, no
+  // repaint): the overlay fades in with the new tone, then the tone commits
+  // to the base layer and the overlay hides (its fade-out is invisible —
+  // the same color is underneath by then).
   //
-  // The overlay is safe in table view because every piece of table content
-  // is positioned (stage absolute, showcase/footer relative, header/navs
-  // fixed) and later in DOM order, so all of it paints above the overlay.
-  // In simple view the menu content is in-flow (non-positioned) and a
-  // positioned overlay would paint ABOVE it, so tone changes there commit
-  // instantly instead — the switch is covered by the opaque loading
-  // overlay anyway.
+  // The layer lives inside the hero <main> only, so the crossfade can never
+  // paint above the in-flow list content below (a root-level positioned
+  // overlay would). The list section has its own solid cream background.
   //
   // Opacity-only fades are deliberately kept under prefers-reduced-motion
-  // (same precedent as .eyvan-view-enter and the overlay backdrops in
-  // index.css), so there is no motion guard here.
+  // (same precedent as the overlay backdrops in index.css), so there is no
+  // motion guard here.
   // Backdrop tone crossfade is isolated inside <BackdropToneLayer />.
 
   // Keep the active category pill centered horizontally inside its own scroll rail (without ever vertically scrolling the page!)
   useEffect(() => {
-    if (viewMode !== 'table') return;
     const centerInRail = (
       btn: HTMLButtonElement | null | undefined,
       behavior: ScrollBehavior,
@@ -517,7 +509,7 @@ export default function App() {
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
     };
-  }, [activeCategoryId, viewMode]);
+  }, [activeCategoryId]);
 
   const handleSelectCategory = useCallback((id: CategoryId) => {
     const nextCat = MENU_CATEGORIES.find((c) => c.id === id);
@@ -558,6 +550,10 @@ export default function App() {
     setDrawerItem(item);
   }, []);
 
+  // «نمایش روی میز» (list card / search selection): scroll back to the hero
+  // and select the item there. The user may be deep in the long list, so
+  // jump to the top first — otherwise the hero is off-screen and the
+  // selection change is invisible.
   const handleJumpToTableItem = useCallback((item: MenuItem) => {
     const itemsInCat = MENU_ITEMS.filter(
       (i) => i.categoryId === item.categoryId,
@@ -566,16 +562,11 @@ export default function App() {
       0,
       itemsInCat.findIndex((i) => i.id === item.id),
     );
-    // Jump to the top BEFORE the view swaps (see scrollToTopInstant): the
-    // user may be deep in the long simple menu, and the table page is short,
-    // so without this the browser clamps the scroll to the bottom of the
-    // table page and the footer flashes first.
     scrollToTopInstant();
     setActiveCategoryId(item.categoryId);
     setActiveItemIndex(idx);
     setOverviewMode(false);
     setCameraAngle(item.prefersFrontView ? 'front' : 'top');
-    setViewMode('table');
     setDrawerItem(null);
   }, []);
 
@@ -583,44 +574,20 @@ export default function App() {
     setSelectedBeans((prev) => ({ ...prev, [itemId]: bean }));
   }, []);
 
-  // SimpleMenuView calls this once it has mounted, so the state-driven
-  // loading overlay lifts exactly when the menu is ready to paint.
-  const handleSimpleMenuReady = useCallback(() => {
-    setViewLoading(false);
-  }, []);
-
+  // The list section opens the shared mobile category sheet in 'list'
+  // context (it filters the list); the hero bar opens it in 'table'
+  // context (it switches the table's category).
   const handleOpenMobileCategories = useCallback(() => {
+    setMobileCatsContext('list');
     setMobileCatsOpen(true);
   }, []);
 
-  const handleToggleViewMode = useCallback(() => {
-    // Jump to the top synchronously BEFORE the view swaps, in BOTH
-    // directions (see scrollToTopInstant). The old code scrolled smoothly
-    // from inside the setViewMode updater — a side effect in an updater,
-    // which must stay pure — and only when switching TO the simple menu, so
-    // switching back to the table landed at the clamped bottom of the short
-    // table page. The smooth scroll also raced the lazy-chunk mount and the
-    // browser's scroll anchoring, flashing the end of the long menu.
-    scrollToTopInstant();
-    setOverviewMode(false);
-    setDrawerItem(null);
-    if (viewMode === 'table') {
-      // Switching TO the simple menu: its chunk is lazy, so engage the
-      // loading overlay synchronously BEFORE the swap. The overlay renders
-      // at App root level (outside the animating view div) and lifts when
-      // SimpleMenuView reports it has mounted. The table view is
-      // synchronous (direct import, no Suspense), so no overlay is needed
-      // going back.
-      setViewLoading(true);
-    }
-    setViewMode((prev) => (prev === 'table' ? 'simple' : 'table'));
-  }, [viewMode]);
-
-  // Keyboard navigation in Rotary Table mode
+  // Keyboard navigation for the rotary table (arrow keys step items).
+  // Active anywhere on the page — the hero is always rendered — but never
+  // while an overlay is open or while typing in an input.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (
-        viewMode !== 'table' ||
         drawerItem ||
         searchOpen ||
         infoOpen ||
@@ -655,7 +622,6 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
-    viewMode,
     drawerItem,
     searchOpen,
     infoOpen,
@@ -690,21 +656,15 @@ export default function App() {
     );
   }
 
+  // Root overflow-x-clip (NOT hidden): clip contains horizontal overflow
+  // without creating a scroll container — overflow-x: hidden would compute
+  // overflow-y to auto, making this div the sticky elements' scroll
+  // container and breaking the list's sticky category bar (it scrolled away
+  // with the page instead of sticking under the header).
   return (
-    <div
-      className="relative min-h-screen w-full overflow-x-hidden text-[#2F321C]"
-      style={{ backgroundColor: viewMode === 'simple' ? '#F8F7F2' : undefined }}
-    >
-      <BackdropToneLayer hex={backdropHex} active={viewMode === 'table'} />
+    <div className="relative min-h-screen w-full overflow-x-clip bg-[#F8F7F2] text-[#2F321C]">
       {splash !== 'gone' && <SplashScreen leaving={splash === 'leaving'} />}
-      {/* View-switch loading overlay: rendered at App root level, OUTSIDE
-      the `.eyvan-view-enter` div — an ancestor with opacity < 1 becomes the
-      containing block for this fixed overlay and breaks its positioning
-      (that is exactly why the old in-view Suspense fallback let the footer
-      show through for ~1s). Fully opaque; lifts when the new view reports
-      it has mounted. */}
-      {viewLoading && <SplashScreen compact />}
-      {/* Top Bar — 3-Zone Editorial Header (Official Eyvan Logo · Clean Links · Simple Menu / Rotary Table Toggle) */}
+      {/* Top Bar — 3-Zone Editorial Header (Official Eyvan Logo · Clean Links · Language Switcher) */}
       <header className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[rgba(107,112,67,0.1)] bg-[#FFFFFF]/96 md:h-16 lg:bg-[#FFFFFF]/96">
         <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-10">
           {/* Zone 1: Official Eyvan Brand Mark */}
@@ -712,7 +672,6 @@ export default function App() {
             type="button"
             onClick={() => {
               scrollToTopInstant();
-              setViewMode('table');
               setOverviewMode(false);
               setCameraAngle('top');
               setDrawerItem(null);
@@ -729,20 +688,18 @@ export default function App() {
             aria-label="ناوبری اصلی"
             className="hidden items-center gap-7 text-sm font-normal text-[#57534E] md:flex"
           >
-            {viewMode === 'table' && (
-              <button
-                type="button"
-                onClick={() => {
-                  setCameraAngle('top');
-                  setOverviewMode((v) => !v);
-                }}
-                className={`whitespace-nowrap shrink-0 transition-colors hover:text-[#2F321C] ${
-                  overviewMode ? 'text-[#6B7043]' : ''
-                }`}
-              >
-                {t.overviewTable}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setCameraAngle('top');
+                setOverviewMode((v) => !v);
+              }}
+              className={`whitespace-nowrap shrink-0 transition-colors hover:text-[#2F321C] ${
+                overviewMode ? 'text-[#6B7043]' : ''
+              }`}
+            >
+              {t.overviewTable}
+            </button>
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
@@ -768,7 +725,7 @@ export default function App() {
             </a>
           </nav>
 
-          {/* Zone 3: Language Switcher (FA <-> AR) + Mode Switcher */}
+          {/* Zone 3: Language Switcher (FA <-> AR) */}
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
@@ -779,47 +736,35 @@ export default function App() {
               <Globe className="h-3.5 w-3.5 text-[#6B7043]" strokeWidth={1.7} />
               <span>{t.langShort}</span>
             </button>
-            <button
-              type="button"
-              onClick={handleToggleViewMode}
-              className="inline-flex h-10 items-center gap-2 rounded-[10px] border border-[rgba(181,148,91,0.44)] bg-[#FFFFFF]/95 px-2.5 py-1.5 text-xs font-medium text-[#2F321C] transition-colors hover:border-[#B5945B] hover:bg-[#E8EAD9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap shrink-0 sm:px-4 sm:text-sm"
-            >
-              {viewMode === 'table' ? (
-                <>
-                  <List
-                    className="h-4 w-4 text-[#6B7043]"
-                    strokeWidth={1.7}
-                  />
-                  <span>{t.simpleMenu}</span>
-                </>
-              ) : (
-                <>
-                  <Disc
-                    className="h-4 w-4 text-[#6B7043]"
-                    strokeWidth={1.7}
-                  />
-                  <span>{t.rotaryTable}</span>
-                </>
-              )}
-            </button>
           </div>
         </div>
       </header>
 
-      {/* Mobile Always-Visible Top Category Bar (directly below header — never hidden by mobile browser toolbars!).
-          Rendered at App ROOT level, OUTSIDE `.eyvan-view-enter` and `<main>`: a fixed
-          element nested inside the view-enter div (whose opacity animation makes it a
-          containing block) can be painted over by the footer mid-scroll — the header
-          and the view-switch overlay already live here for the same reason. */}
-      {viewMode === 'table' && (
+      {/* Single scrollable page: the rotary table is the hero on top,
+      the full list menu is a section below it, then the cafe-info footer.
+      No view switching — the «منوی ساده» toggle is gone. */}
+      {/* Hero: the rotary table, full-screen. 100svh (not dvh): the small
+      viewport height is stable while the mobile browser toolbar
+      shows/hides — with dvh the table height tracked the toolbar and the
+      card jumped mid-scroll and on tab return. */}
+      <main className="relative h-[100svh] min-h-[600px] w-full overflow-hidden">
+        <BackdropToneLayer hex={backdropHex} />
+
+        {/* Mobile category bar (directly below the header — never hidden by
+        mobile browser toolbars). Absolute inside the hero, so it scrolls
+        away with the hero; while the hero is in view it looks identical to
+        the old fixed bar (top-12 = directly below the h-12 header). */}
         <nav
           aria-label="انتخاب دسته‌بندی منو در موبایل"
-          className="fixed inset-x-0 top-12 z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1 md:top-16 lg:hidden"
+          className="absolute inset-x-0 top-12 z-30 border-b border-[rgba(107,112,67,0.1)] bg-[#F8F7F2]/97 px-2.5 py-1 md:top-16 lg:hidden"
         >
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setMobileCatsOpen(true)}
+              onClick={() => {
+                setMobileCatsContext('table');
+                setMobileCatsOpen(true);
+              }}
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[rgba(181,148,91,0.55)] bg-[#6B7043] px-2.5 text-[11.5px] font-medium text-white whitespace-nowrap transition-colors hover:bg-[#4F5330]"
             >
               <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.8} />
@@ -858,17 +803,440 @@ export default function App() {
             </div>
           </div>
         </nav>
-      )}
+        {/* Layer 1: Giant Rotating Circular Marble Tabletop + 3D Forward Camera Tilt */}
+        <RotaryTableStage
+          category={activeCategory}
+          items={categoryItems}
+          activeIndex={safeIndex}
+          overviewMode={overviewMode}
+          cameraAngle={cameraAngle}
+          drawerOpen={Boolean(drawerItem)}
+          onSelectIndex={handleSelectIndex}
+          onStep={handleStepItem}
+          onExitOverviewToIndex={handleExitOverviewToIndex}
+          onChangeCameraAngle={setCameraAngle}
+        />
 
-      {/* Main Content: Either Rotary 3D Circular Table OR Classic Simple Menu */}
-      <div key={viewMode} className="eyvan-view-enter">
-        {viewMode === 'simple' ? (
-        // min-h belt and braces: while the lazy chunk loads, the Suspense
-        // fallback takes no layout space, so without this the footer jumps
-        // up under the header. The min-height keeps it below the fold even
-        // if the overlay is ever absent.
-        <main className="min-h-[100dvh]">
-          <Suspense fallback={<SplashScreen compact />}>
+        {/* Mobile Soft Bottom Scrim for Ultra-Crisp Persian Text Legibility.
+        Two heights crossfade (opacity-only) instead of one layer snapping
+        h-[54%] <-> h-[47%] on camera toggle — the snap moved the fade's
+        top edge ~7% of the viewport instantly while the camera glided
+        600ms. Opacity-only fades are kept under prefers-reduced-motion
+        (see index.css), so no motion guard is needed. */}
+        {!overviewMode && (
+          <>
+            <div
+              aria-hidden="true"
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[54%] bg-gradient-to-t from-[#F8F7F2] via-[#F8F7F2]/92 to-transparent transition-opacity duration-500 ease-out lg:hidden ${
+                cameraAngle === 'front' ? 'opacity-0' : 'opacity-100'
+              }`}
+            />
+            <div
+              aria-hidden="true"
+              className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[47%] bg-gradient-to-t from-[#F8F7F2] via-[#F8F7F2]/92 to-transparent transition-opacity duration-500 ease-out lg:hidden ${
+                cameraAngle === 'front' ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          </>
+        )}
+
+        {/* Overview Mode Top Exit Bar */}
+        {overviewMode && (
+          <div className="eyvan-text-enter pointer-events-none absolute inset-x-0 top-[108px] z-20 flex justify-center px-4 lg:top-[72px]">
+            <div className="pointer-events-auto flex items-center gap-3.5 rounded-[12px] border border-[rgba(107,112,67,0.16)] bg-[#F8F7F2]/94 px-4 py-1.5 text-xs text-[#2F321C]">
+              <span>{t.overviewBarPrefix} · {activeCategory.name}</span>
+              <span aria-hidden="true" className="text-[#A8A29E]">
+                ·
+              </span>
+              <button
+                type="button"
+                onClick={() => setOverviewMode(false)}
+                className="font-medium text-[#6B7043] transition-colors hover:text-[#4F5330]"
+              >
+                {t.backToSingleView}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Layer 2: Right-Side Editorial Product Showcase (Desktop RTL Right / Mobile Lower Sheet) */}
+        <section
+          aria-label="جزئیات محصول انتخاب‌شده روی میز"
+          className={`eyvan-showcase-panel pointer-events-none relative z-20 mx-auto flex h-full max-w-[1440px] flex-col justify-end px-3 pt-28 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-[opacity,transform] duration-300 ease-out sm:px-6 lg:flex-row lg:items-center lg:justify-start lg:px-12 lg:pt-16 lg:pb-16 ${
+            overviewMode
+              ? 'translate-y-4 opacity-0'
+              : 'translate-y-0 opacity-100'
+          }`}
+        >
+          {/* No swipe handlers on the card: item-step swiping lives on the
+              table/stage drag only — the card swipe covered the whole display. */}
+          <div
+            className={`pointer-events-auto w-full max-w-[460px] rounded-[18px] border border-[rgba(107,112,67,0.12)] bg-[#F8F7F2]/94 px-4 py-3.5 lg:max-w-[440px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 ${
+              overviewMode ? 'pointer-events-none' : ''
+            }`}
+          >
+            {activeCategory.comingSoon ? (
+              <div
+                key={activeCategory.id}
+                className="eyvan-text-enter space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-[#6B7043]">
+                    <span>{t.eyvanKitchen}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{t.comingSoon}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 lg:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setSearchOpen(true)}
+                      aria-label="جستجو در منو"
+                      className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
+                    >
+                      <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    </button>
+                  </div>
+                </div>
+
+                <h1 className="text-2xl font-semibold leading-tight text-[#2F321C] sm:text-4xl lg:text-[46px]">
+                  {activeCategory.name}
+                </h1>
+
+                <p className="text-[13px] leading-6 text-[#57534E] sm:text-[15px] sm:leading-7">
+                  {activeCategory.comingSoonDescription}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectCategory('hot-coffee')}
+                    className="rounded-[10px] bg-[#6B7043] px-4 py-2.5 text-xs font-medium text-[#F8F7F2] transition-colors hover:bg-[#4F5330] sm:px-5 sm:text-sm"
+                  >
+                    {t.viewHotCoffee}
+                  </button>
+                  <a
+                    href={CAFE_INFO.instagramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(107,112,67,0.22)] bg-[#FFFFFF]/80 px-3.5 py-2.5 text-xs text-[#2F321C] transition-colors hover:border-[#B5945B] sm:px-4 sm:text-sm"
+                  >
+                    <InstagramIcon className="h-4 w-4 text-[#6B7043]" />
+                    <span>{t.followLaunchInstagram}</span>
+                  </a>
+                </div>
+              </div>
+            ) : activeItem ? (
+              <div className="space-y-2.5 lg:space-y-4">
+                {/* Top Row: Category & Counter Metadata + Compact Mobile Quick Tools */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-[#6B7043]">
+                    <span>{activeCategory.shortName}</span>
+                    <span aria-hidden="true" className="text-[#A8A29E]">
+                      ·
+                    </span>
+                    <span className="tabular-fa text-[#57534E]">
+                      {formatDigits(safeIndex + 1)} {t.ofWord}{' '}
+                      {formatDigits(categoryItems.length)}
+                    </span>
+                    {activeItem.highlight && (
+                      <>
+                        <span aria-hidden="true" className="text-[#A8A29E]">
+                          ·
+                        </span>
+                        <span className="text-[#6B7043]">
+                          {activeItem.highlight}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Mobile Compact Utility Buttons */}
+                  <div className="flex shrink-0 items-center gap-1.5 lg:hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCameraAngle('top');
+                        setOverviewMode(true);
+                      }}
+                      aria-label="نمای کلی میز"
+                      className="inline-flex h-8 items-center gap-1 rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 px-2.5 text-[11px] font-medium text-[#2F321C] transition-colors hover:border-[#B5945B]"
+                    >
+                      <Disc
+                        className="h-3.5 w-3.5 text-[#6B7043]"
+                        strokeWidth={1.7}
+                      />
+                      <span>{t.overviewShort}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchOpen(true)}
+                      aria-label="جستجو در منو"
+                      className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
+                    >
+                      <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* High-Contrast Persian Title (crossfades with the wheel turn) */}
+                <CrossfadeText itemKey={activeItem.id}>
+                  <h1 className="text-[24px] font-semibold leading-[1.2] text-[#2F321C] sm:text-3xl lg:text-[46px]">
+                    {activeItem.name}
+                  </h1>
+                </CrossfadeText>
+
+                {/* Bright, Scannable Tasting Description (crossfades with the wheel turn) */}
+                {/* Fixed 2-line height so the card never jumps when the new
+                    description wraps to a different line count. */}
+                <CrossfadeText
+                  itemKey={activeItem.id}
+                  className="min-h-10 lg:min-h-14"
+                >
+                  <p className="line-clamp-2 text-[13px] leading-5 text-[#57534E] lg:line-clamp-none lg:text-[15px] lg:leading-7">
+                    {activeItem.description}
+                  </p>
+                </CrossfadeText>
+
+                {/* Live Bean Selector + Toman Price (No Trailing Zeros) */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5 border-y border-[rgba(107,112,67,0.13)] py-2.5 lg:py-3">
+                  <div>
+                    <span className="block text-[10.5px] text-[#78716C] lg:text-[11px]">
+                      {t.priceNoZeros}
+                    </span>
+                    <CrossfadeText itemKey={activeItem.id}>
+                      <div className="tabular-fa mt-0.5 text-[22px] font-semibold text-[#6B7043] lg:text-[28px]">
+                        {formatPrice(activeUnitPrice)}
+                      </div>
+                    </CrossfadeText>
+                  </div>
+
+                  {hasDualBean ? (
+                    <div
+                      role="group"
+                      aria-label="انتخاب نوع دانه قهوه"
+                      className="flex items-center gap-1 rounded-[10px] border border-[rgba(107,112,67,0.18)] bg-[#FFFFFF]/88 p-1"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSetBeanForItem(activeItem.id, 'blend50')
+                        }
+                        className={`rounded-[7px] px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors lg:px-3 ${
+                          activeBean === 'blend50'
+                            ? 'bg-[#6B7043] text-[#F8F7F2]'
+                            : 'text-[#57534E] hover:text-[#2F321C]'
+                        }`}
+                      >
+                        {t.blend5050}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSetBeanForItem(activeItem.id, 'arabica100')
+                        }
+                        className={`rounded-[7px] px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors lg:px-3 ${
+                          activeBean === 'arabica100'
+                            ? 'bg-[#6B7043] text-[#F8F7F2]'
+                            : 'text-[#57534E] hover:text-[#2F321C]'
+                        }`}
+                      >
+                        {t.arabica100}
+                      </button>
+                    </div>
+                  ) : isArabicaOnly ? (
+                    <span className="text-xs font-medium text-[#6B7043]">
+                      {t.arabicaExclusive}
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Primary & Secondary Actions: Balanced 2-Column Touch Grid on Mobile / Inline on Desktop */}
+                <div className="grid grid-cols-2 gap-2 pt-0.5 lg:flex lg:flex-wrap lg:items-center lg:gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCameraAngle((prev) =>
+                        prev === 'front' ? 'top' : 'front',
+                      )
+                    }
+                    className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap lg:px-4 lg:py-2.5 lg:text-sm ${
+                      cameraAngle === 'front'
+                        ? 'border border-[#B5945B] bg-[#6B7043] text-white hover:bg-[#4F5330]'
+                        : activeItem.prefersFrontView
+                          ? 'bg-[#6B7043] text-[#F8F7F2] hover:bg-[#4F5330]'
+                          : 'border border-[rgba(181,148,91,0.46)] bg-[#FFFFFF]/85 text-[#2F321C] hover:border-[#B5945B] hover:bg-[#FFFFFF]'
+                    }`}
+                  >
+                    {cameraAngle === 'front' ? (
+                      <>
+                        <RotateCcw className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4" strokeWidth={1.7} />
+                        <span>{t.backToTopView}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4" strokeWidth={1.7} />
+                        <span>
+                          {activeItem.prefersFrontView
+                            ? t.viewFrontAngle
+                            : t.frontCupView}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDrawerItem(activeItem)}
+                    className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap lg:px-4 lg:py-2.5 lg:text-sm ${
+                      activeItem.prefersFrontView && cameraAngle !== 'front'
+                        ? 'border border-[rgba(107,112,67,0.22)] bg-[#FFFFFF]/85 text-[#2F321C] hover:border-[#B5945B]'
+                        : 'bg-[#FFFFFF] text-[#2F321C] hover:bg-[#E8EAD9]'
+                    }`}
+                  >
+                    <SlidersHorizontal
+                      className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4"
+                      strokeWidth={1.6}
+                    />
+                    <span>
+                      {activeItem.supportsSyrup
+                        ? t.syrupAndDetails
+                        : t.productDetails}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Official Printed Milk Temperature Notice on Hot Bar.
+                    Always mounted with a grid-rows collapse so switching
+                    between milk-temp and non-milk-temp items animates the
+                    card height instead of snapping it (no layout jump). */}
+                <div
+                  className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+                    activeCategory.isHotCategory &&
+                    activeItem.supportsMilkTemp
+                      ? 'grid-rows-[1fr]'
+                      : 'grid-rows-[0fr]'
+                  }`}
+                >
+                  <p className="flex min-h-0 items-start gap-2 overflow-hidden text-[11px] leading-5 text-[#78716C]">
+                    <Thermometer
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B7043]"
+                      strokeWidth={1.6}
+                    />
+                    <span>{cafeInfo.milkTempNote}</span>
+                  </p>
+                </div>
+
+                {/* Rotary Table Next Control (single right-side ">" button) + Desktop Overview Trigger */}
+                <div className="flex items-center justify-between gap-3 pt-0.5 lg:justify-start lg:gap-5 lg:pt-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleStepItem(1)}
+                      aria-label="نوشیدنی بعدی روی میز"
+                      className="flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(107,112,67,0.24)] bg-[#FFFFFF]/90 text-[#2F321C] transition-colors hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] lg:h-10 lg:w-10"
+                    >
+                      <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCameraAngle('top');
+                      setOverviewMode(true);
+                    }}
+                    className="hidden items-center gap-1.5 text-xs font-medium text-[#6B7043] transition-colors hover:text-[#4F5330] lg:inline-flex"
+                  >
+                    <Disc className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    <span>{t.fullTrayView}</span>
+                  </button>
+
+                  {/* Interactive pagination dots on mobile for effortless one-thumb navigation */}
+                  {categoryItems.length > 1 && (
+                    <div
+                      className="flex items-center gap-1.5 lg:hidden"
+                      role="tablist"
+                      aria-label={activeCategory.name}
+                    >
+                      {categoryItems.map((it, idx) => {
+                        const activeDot = idx === safeIndex;
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeDot}
+                            aria-label={it.name}
+                            onClick={() => handleSelectIndex(idx)}
+                            className={`h-2 rounded-full transition-[width,background-color] duration-200 ${
+                              activeDot
+                                ? 'w-5 bg-[#6B7043]'
+                                : 'w-2 bg-[#6B7043]/25 hover:bg-[#6B7043]/50'
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* Desktop Bottom Spatial Category Dock (Mobile uses the always-visible top category bar below header) */}
+        <nav
+          aria-label="دسته‌بندی‌های منوی کافه و رستوران ایوان"
+          className="pointer-events-none absolute inset-x-0 bottom-3 z-30 hidden justify-center px-3 lg:flex"
+        >
+          <div className="pointer-events-auto flex h-[52px] w-auto max-w-[1180px] items-center gap-1.5 rounded-[14px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/95 p-1.5 shadow-xl">
+            <div className="eyvan-scroll-hidden flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+              {localizedCategories.map((category) => {
+                const isActive = category.id === activeCategoryId;
+                return (
+                  <button
+                    key={category.id}
+                    ref={(el) => {
+                      dockButtonsRef.current[category.id] = el;
+                    }}
+                    type="button"
+                    onPointerDown={() => warmCategoryPlates(category.id)}
+                    onMouseEnter={() => warmCategoryPlates(category.id)}
+                    onClick={() => handleSelectCategory(category.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-3 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
+                      isActive
+                        ? 'border border-[rgba(181,148,91,0.52)] bg-[#6B7043] text-white'
+                        : 'border border-transparent text-[#57534E] hover:bg-[#FFFFFF] hover:text-[#2F321C]'
+                    }`}
+                  >
+                    <span>{category.shortName}</span>
+                    {category.comingSoon && (
+                      <span className="text-[10px] font-normal text-[#6B7043]">
+                        {t.comingSoon}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </nav>
+      </main>
+
+      {/* Full list menu, below the hero on the same page. Mounts only when
+      the user scrolls near it (see listInView); the 400px placeholder keeps
+      the page scrollable before then, and the chunk is idle-preloaded so
+      the mount itself is fast. No onReady/scroll-to-top: the list mounts
+      while the user is already scrolled down and must never yank them back
+      to the hero. */}
+      <section
+        ref={listSectionRef}
+        aria-label="منوی کامل کافه و رستوران ایوان"
+        className="relative z-20 bg-[#F8F7F2]"
+      >
+        {listInView ? (
+          <Suspense fallback={<div className="min-h-[400px]" aria-hidden="true" />}>
             <SimpleMenuView
               selectedCategory={simpleCategoryId}
               onSelectCategory={setSimpleCategoryId}
@@ -876,446 +1244,17 @@ export default function App() {
               onSelectItemDetails={handleSelectItemDetails}
               onInspectOnTable={handleJumpToTableItem}
               onOpenMobileCategories={handleOpenMobileCategories}
-              onReady={handleSimpleMenuReady}
             />
           </Suspense>
-        </main>
-      ) : (
-        // 100svh (not dvh): the small viewport height is stable while the mobile
-        // browser toolbar shows/hides — with dvh the table height tracked the
-        // toolbar and the card jumped mid-scroll and on tab return.
-        <main className="relative h-[100svh] min-h-[600px] w-full overflow-hidden">
-          {/* Layer 1: Giant Rotating Circular Marble Tabletop + 3D Forward Camera Tilt */}
-          <RotaryTableStage
-            category={activeCategory}
-            items={categoryItems}
-            activeIndex={safeIndex}
-            overviewMode={overviewMode}
-            cameraAngle={cameraAngle}
-            drawerOpen={Boolean(drawerItem)}
-            onSelectIndex={handleSelectIndex}
-            onStep={handleStepItem}
-            onExitOverviewToIndex={handleExitOverviewToIndex}
-            onChangeCameraAngle={setCameraAngle}
-          />
-
-          {/* Mobile Soft Bottom Scrim for Ultra-Crisp Persian Text Legibility.
-          Two heights crossfade (opacity-only) instead of one layer snapping
-          h-[54%] <-> h-[47%] on camera toggle — the snap moved the fade's
-          top edge ~7% of the viewport instantly while the camera glided
-          600ms. Opacity-only fades are kept under prefers-reduced-motion
-          (see index.css), so no motion guard is needed. */}
-          {!overviewMode && (
-            <>
-              <div
-                aria-hidden="true"
-                className={`pointer-events-none fixed inset-x-0 bottom-0 z-10 h-[54%] bg-gradient-to-t from-[#F8F7F2] via-[#F8F7F2]/92 to-transparent transition-opacity duration-500 ease-out lg:hidden ${
-                  cameraAngle === 'front' ? 'opacity-0' : 'opacity-100'
-                }`}
-              />
-              <div
-                aria-hidden="true"
-                className={`pointer-events-none fixed inset-x-0 bottom-0 z-10 h-[47%] bg-gradient-to-t from-[#F8F7F2] via-[#F8F7F2]/92 to-transparent transition-opacity duration-500 ease-out lg:hidden ${
-                  cameraAngle === 'front' ? 'opacity-100' : 'opacity-0'
-                }`}
-              />
-            </>
-          )}
-
-          {/* Overview Mode Top Exit Bar */}
-          {overviewMode && (
-            <div className="eyvan-text-enter pointer-events-none fixed inset-x-0 top-[108px] z-20 flex justify-center px-4 lg:top-[72px]">
-              <div className="pointer-events-auto flex items-center gap-3.5 rounded-[12px] border border-[rgba(107,112,67,0.16)] bg-[#F8F7F2]/94 px-4 py-1.5 text-xs text-[#2F321C]">
-                <span>{t.overviewBarPrefix} · {activeCategory.name}</span>
-                <span aria-hidden="true" className="text-[#A8A29E]">
-                  ·
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setOverviewMode(false)}
-                  className="font-medium text-[#6B7043] transition-colors hover:text-[#4F5330]"
-                >
-                  {t.backToSingleView}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Layer 2: Right-Side Editorial Product Showcase (Desktop RTL Right / Mobile Lower Sheet) */}
-          <section
-            aria-label="جزئیات محصول انتخاب‌شده روی میز"
-            className={`eyvan-showcase-panel pointer-events-none relative z-20 mx-auto flex h-full max-w-[1440px] flex-col justify-end px-3 pt-28 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-[opacity,transform] duration-300 ease-out sm:px-6 lg:flex-row lg:items-center lg:justify-start lg:px-12 lg:pt-16 lg:pb-16 ${
-              overviewMode
-                ? 'translate-y-4 opacity-0'
-                : 'translate-y-0 opacity-100'
-            }`}
-          >
-            {/* No swipe handlers on the card: item-step swiping lives on the
-                table/stage drag only — the card swipe covered the whole display. */}
-            <div
-              className={`pointer-events-auto w-full max-w-[460px] rounded-[18px] border border-[rgba(107,112,67,0.12)] bg-[#F8F7F2]/94 px-4 py-3.5 lg:max-w-[440px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 ${
-                overviewMode ? 'pointer-events-none' : ''
-              }`}
-            >
-              {activeCategory.comingSoon ? (
-                <div
-                  key={activeCategory.id}
-                  className="eyvan-text-enter space-y-3"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-medium text-[#6B7043]">
-                      <span>{t.eyvanKitchen}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{t.comingSoon}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 lg:hidden">
-                      <button
-                        type="button"
-                        onClick={() => setSearchOpen(true)}
-                        aria-label="جستجو در منو"
-                        className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
-                      >
-                        <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <h1 className="text-2xl font-semibold leading-tight text-[#2F321C] sm:text-4xl lg:text-[46px]">
-                    {activeCategory.name}
-                  </h1>
-
-                  <p className="text-[13px] leading-6 text-[#57534E] sm:text-[15px] sm:leading-7">
-                    {activeCategory.comingSoonDescription}
-                  </p>
-
-                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectCategory('hot-coffee')}
-                      className="rounded-[10px] bg-[#6B7043] px-4 py-2.5 text-xs font-medium text-[#F8F7F2] transition-colors hover:bg-[#4F5330] sm:px-5 sm:text-sm"
-                    >
-                      {t.viewHotCoffee}
-                    </button>
-                    <a
-                      href={CAFE_INFO.instagramUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(107,112,67,0.22)] bg-[#FFFFFF]/80 px-3.5 py-2.5 text-xs text-[#2F321C] transition-colors hover:border-[#B5945B] sm:px-4 sm:text-sm"
-                    >
-                      <InstagramIcon className="h-4 w-4 text-[#6B7043]" />
-                      <span>{t.followLaunchInstagram}</span>
-                    </a>
-                  </div>
-                </div>
-              ) : activeItem ? (
-                <div className="space-y-2.5 lg:space-y-4">
-                  {/* Top Row: Category & Counter Metadata + Compact Mobile Quick Tools */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-[#6B7043]">
-                      <span>{activeCategory.shortName}</span>
-                      <span aria-hidden="true" className="text-[#A8A29E]">
-                        ·
-                      </span>
-                      <span className="tabular-fa text-[#57534E]">
-                        {formatDigits(safeIndex + 1)} {t.ofWord}{' '}
-                        {formatDigits(categoryItems.length)}
-                      </span>
-                      {activeItem.highlight && (
-                        <>
-                          <span aria-hidden="true" className="text-[#A8A29E]">
-                            ·
-                          </span>
-                          <span className="text-[#6B7043]">
-                            {activeItem.highlight}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Mobile Compact Utility Buttons */}
-                    <div className="flex shrink-0 items-center gap-1.5 lg:hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCameraAngle('top');
-                          setOverviewMode(true);
-                        }}
-                        aria-label="نمای کلی میز"
-                        className="inline-flex h-8 items-center gap-1 rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 px-2.5 text-[11px] font-medium text-[#2F321C] transition-colors hover:border-[#B5945B]"
-                      >
-                        <Disc
-                          className="h-3.5 w-3.5 text-[#6B7043]"
-                          strokeWidth={1.7}
-                        />
-                        <span>{t.overviewShort}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSearchOpen(true)}
-                        aria-label="جستجو در منو"
-                        className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/90 text-[#2F321C]"
-                      >
-                        <Search className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* High-Contrast Persian Title (crossfades with the wheel turn) */}
-                  <CrossfadeText itemKey={activeItem.id}>
-                    <h1 className="text-[24px] font-semibold leading-[1.2] text-[#2F321C] sm:text-3xl lg:text-[46px]">
-                      {activeItem.name}
-                    </h1>
-                  </CrossfadeText>
-
-                  {/* Bright, Scannable Tasting Description (crossfades with the wheel turn) */}
-                  {/* Fixed 2-line height so the card never jumps when the new
-                      description wraps to a different line count. */}
-                  <CrossfadeText
-                    itemKey={activeItem.id}
-                    className="min-h-10 lg:min-h-14"
-                  >
-                    <p className="line-clamp-2 text-[13px] leading-5 text-[#57534E] lg:line-clamp-none lg:text-[15px] lg:leading-7">
-                      {activeItem.description}
-                    </p>
-                  </CrossfadeText>
-
-                  {/* Live Bean Selector + Toman Price (No Trailing Zeros) */}
-                  <div className="flex flex-wrap items-center justify-between gap-2.5 border-y border-[rgba(107,112,67,0.13)] py-2.5 lg:py-3">
-                    <div>
-                      <span className="block text-[10.5px] text-[#78716C] lg:text-[11px]">
-                        {t.priceNoZeros}
-                      </span>
-                      <CrossfadeText itemKey={activeItem.id}>
-                        <div className="tabular-fa mt-0.5 text-[22px] font-semibold text-[#6B7043] lg:text-[28px]">
-                          {formatPrice(activeUnitPrice)}
-                        </div>
-                      </CrossfadeText>
-                    </div>
-
-                    {hasDualBean ? (
-                      <div
-                        role="group"
-                        aria-label="انتخاب نوع دانه قهوه"
-                        className="flex items-center gap-1 rounded-[10px] border border-[rgba(107,112,67,0.18)] bg-[#FFFFFF]/88 p-1"
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleSetBeanForItem(activeItem.id, 'blend50')
-                          }
-                          className={`rounded-[7px] px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors lg:px-3 ${
-                            activeBean === 'blend50'
-                              ? 'bg-[#6B7043] text-[#F8F7F2]'
-                              : 'text-[#57534E] hover:text-[#2F321C]'
-                          }`}
-                        >
-                          {t.blend5050}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleSetBeanForItem(activeItem.id, 'arabica100')
-                          }
-                          className={`rounded-[7px] px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors lg:px-3 ${
-                            activeBean === 'arabica100'
-                              ? 'bg-[#6B7043] text-[#F8F7F2]'
-                              : 'text-[#57534E] hover:text-[#2F321C]'
-                          }`}
-                        >
-                          {t.arabica100}
-                        </button>
-                      </div>
-                    ) : isArabicaOnly ? (
-                      <span className="text-xs font-medium text-[#6B7043]">
-                        {t.arabicaExclusive}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {/* Primary & Secondary Actions: Balanced 2-Column Touch Grid on Mobile / Inline on Desktop */}
-                  <div className="grid grid-cols-2 gap-2 pt-0.5 lg:flex lg:flex-wrap lg:items-center lg:gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCameraAngle((prev) =>
-                          prev === 'front' ? 'top' : 'front',
-                        )
-                      }
-                      className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap lg:px-4 lg:py-2.5 lg:text-sm ${
-                        cameraAngle === 'front'
-                          ? 'border border-[#B5945B] bg-[#6B7043] text-white hover:bg-[#4F5330]'
-                          : activeItem.prefersFrontView
-                            ? 'bg-[#6B7043] text-[#F8F7F2] hover:bg-[#4F5330]'
-                            : 'border border-[rgba(181,148,91,0.46)] bg-[#FFFFFF]/85 text-[#2F321C] hover:border-[#B5945B] hover:bg-[#FFFFFF]'
-                      }`}
-                    >
-                      {cameraAngle === 'front' ? (
-                        <>
-                          <RotateCcw className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4" strokeWidth={1.7} />
-                          <span>{t.backToTopView}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4" strokeWidth={1.7} />
-                          <span>
-                            {activeItem.prefersFrontView
-                              ? t.viewFrontAngle
-                              : t.frontCupView}
-                          </span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setDrawerItem(activeItem)}
-                      className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] whitespace-nowrap lg:px-4 lg:py-2.5 lg:text-sm ${
-                        activeItem.prefersFrontView && cameraAngle !== 'front'
-                          ? 'border border-[rgba(107,112,67,0.22)] bg-[#FFFFFF]/85 text-[#2F321C] hover:border-[#B5945B]'
-                          : 'bg-[#FFFFFF] text-[#2F321C] hover:bg-[#E8EAD9]'
-                      }`}
-                    >
-                      <SlidersHorizontal
-                        className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4"
-                        strokeWidth={1.6}
-                      />
-                      <span>
-                        {activeItem.supportsSyrup
-                          ? t.syrupAndDetails
-                          : t.productDetails}
-                      </span>
-                    </button>
-                  </div>
-
-                  {/* Official Printed Milk Temperature Notice on Hot Bar.
-                      Always mounted with a grid-rows collapse so switching
-                      between milk-temp and non-milk-temp items animates the
-                      card height instead of snapping it (no layout jump). */}
-                  <div
-                    className={`grid transition-[grid-template-rows] duration-300 ease-out ${
-                      activeCategory.isHotCategory &&
-                      activeItem.supportsMilkTemp
-                        ? 'grid-rows-[1fr]'
-                        : 'grid-rows-[0fr]'
-                    }`}
-                  >
-                    <p className="flex min-h-0 items-start gap-2 overflow-hidden text-[11px] leading-5 text-[#78716C]">
-                      <Thermometer
-                        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B7043]"
-                        strokeWidth={1.6}
-                      />
-                      <span>{cafeInfo.milkTempNote}</span>
-                    </p>
-                  </div>
-
-                  {/* Rotary Table Next Control (single right-side ">" button) + Desktop Overview Trigger */}
-                  <div className="flex items-center justify-between gap-3 pt-0.5 lg:justify-start lg:gap-5 lg:pt-1">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleStepItem(1)}
-                        aria-label="نوشیدنی بعدی روی میز"
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(107,112,67,0.24)] bg-[#FFFFFF]/90 text-[#2F321C] transition-colors hover:border-[#B5945B] hover:text-[#6B7043] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] lg:h-10 lg:w-10"
-                      >
-                        <ChevronRight className="h-4 w-4" strokeWidth={1.8} />
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCameraAngle('top');
-                        setOverviewMode(true);
-                      }}
-                      className="hidden items-center gap-1.5 text-xs font-medium text-[#6B7043] transition-colors hover:text-[#4F5330] lg:inline-flex"
-                    >
-                      <Disc className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      <span>{t.fullTrayView}</span>
-                    </button>
-
-                    {/* Interactive pagination dots on mobile for effortless one-thumb navigation */}
-                    {categoryItems.length > 1 && (
-                      <div
-                        className="flex items-center gap-1.5 lg:hidden"
-                        role="tablist"
-                        aria-label={activeCategory.name}
-                      >
-                        {categoryItems.map((it, idx) => {
-                          const activeDot = idx === safeIndex;
-                          return (
-                            <button
-                              key={it.id}
-                              type="button"
-                              role="tab"
-                              aria-selected={activeDot}
-                              aria-label={it.name}
-                              onClick={() => handleSelectIndex(idx)}
-                              className={`h-2 rounded-full transition-[width,background-color] duration-200 ${
-                                activeDot
-                                  ? 'w-5 bg-[#6B7043]'
-                                  : 'w-2 bg-[#6B7043]/25 hover:bg-[#6B7043]/50'
-                              }`}
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          {/* Desktop Bottom Spatial Category Dock (Mobile uses the always-visible top category bar below header) */}
-          <nav
-            aria-label="دسته‌بندی‌های منوی کافه و رستوران ایوان"
-            className="pointer-events-none fixed inset-x-0 bottom-3 z-30 hidden justify-center px-3 lg:flex"
-          >
-            <div className="pointer-events-auto flex h-[52px] w-auto max-w-[1180px] items-center gap-1.5 rounded-[14px] border border-[rgba(107,112,67,0.16)] bg-[#FFFFFF]/95 p-1.5 shadow-xl">
-              <div className="eyvan-scroll-hidden flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-                {localizedCategories.map((category) => {
-                  const isActive = category.id === activeCategoryId;
-                  return (
-                    <button
-                      key={category.id}
-                      ref={(el) => {
-                        dockButtonsRef.current[category.id] = el;
-                      }}
-                      type="button"
-                      onPointerDown={() => warmCategoryPlates(category.id)}
-                      onMouseEnter={() => warmCategoryPlates(category.id)}
-                      onClick={() => handleSelectCategory(category.id)}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-3 text-xs font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6B7043] ${
-                        isActive
-                          ? 'border border-[rgba(181,148,91,0.52)] bg-[#6B7043] text-white'
-                          : 'border border-transparent text-[#57534E] hover:bg-[#FFFFFF] hover:text-[#2F321C]'
-                      }`}
-                    >
-                      <span>{category.shortName}</span>
-                      {category.comingSoon && (
-                        <span className="text-[10px] font-normal text-[#6B7043]">
-                          {t.comingSoon}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </nav>
-        </main>
+        ) : (
+          <div className="min-h-[400px]" aria-hidden="true" />
         )}
-      </div>
+      </section>
 
       {/* Grounded Editorial Footer (Official Eyvan Logo, Hours, Location, Cashier Note & Instagram).
           No content-visibility here: the old `auto 320px` estimate (real height ~500px)
           jumped the page height when the footer scrolled into view. */}
-      <footer
-        className={`relative z-20 border-t border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] px-5 pt-8 sm:px-8 lg:px-12 lg:pt-12 ${
-          viewMode === 'table' ? 'pb-10 lg:pb-24' : 'pb-12'
-        }`}
-      >
+      <footer className="relative z-20 border-t border-[rgba(107,112,67,0.1)] bg-[#FFFFFF] px-5 pt-8 pb-10 sm:px-8 lg:px-12 lg:pt-12">
         <div className="mx-auto flex max-w-[1320px] flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-8">
           <div className="flex flex-col items-start gap-3">
             <EyvanLogo
@@ -1413,11 +1352,11 @@ export default function App() {
           <MobileCategorySheet
             open={mobileCatsOpen}
             activeCategoryId={
-              viewMode === 'simple' ? simpleCategoryId : activeCategoryId
+              mobileCatsContext === 'list' ? simpleCategoryId : activeCategoryId
             }
-            includeAllOption={viewMode === 'simple'}
+            includeAllOption={mobileCatsContext === 'list'}
             onSelect={(catId) => {
-              if (viewMode === 'simple') {
+              if (mobileCatsContext === 'list') {
                 setSimpleCategoryId(catId);
               } else if (catId !== 'all') {
                 handleSelectCategory(catId);

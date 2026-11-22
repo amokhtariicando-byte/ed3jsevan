@@ -31,11 +31,14 @@
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
-    /* Pinch-zoom off: pan-x pan-y lets the browser handle single-finger
-       scroll/swipe but blocks two-finger pinch-zoom (which the viewport
-       meta alone can't stop on iOS Safari). The stage sets its own tighter
-       touch-action (pan-y), which still wins there via intersection. */
-    touch-action: pan-x pan-y;
+    /* Vertical-only page panning (issue #10): the page must scroll
+       vertically only — horizontal panning is never a page gesture here.
+       `pan-y` also blocks two-finger pinch-zoom (which the viewport meta
+       alone can't stop on iOS Safari). The horizontal category rails keep
+       their swipe: each rail is its own scroll container, and touch-action
+       intersection stops at the container that implements the gesture (see
+       `.eyvan-scroll-hidden`). The stage sets its own pan-y + JS drag. */
+    touch-action: pan-y;
   }
 
   body {
@@ -221,12 +224,9 @@
   transform: translateY(-12px);
 }
 
-/* View + grid transitions (plan 010). The opacity-only fades share
+/* Grid transitions (plan 010). The opacity-only fades share
    eyvanFadeIn (defined above); only the card reveal keeps its own
    keyframes because it also translates. */
-.eyvan-view-enter {
-  animation: eyvanFadeIn 250ms var(--ease-out) both;
-}
 @keyframes eyvanCardIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -260,6 +260,10 @@
 .eyvan-scroll-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  /* Horizontal rails keep their swipe even though <html> is pan-y-only:
+     this element is the scroll container that implements the horizontal
+     gesture, so its own touch-action governs (intersection stops here). */
+  touch-action: pan-x pan-y;
 }
 
 .eyvan-scroll-hidden::-webkit-scrollbar {

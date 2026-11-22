@@ -1041,6 +1041,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     pointerId: number;
     captureSet: boolean;
     isLinearMobile: boolean;
+    isTouch: boolean;
     axisLock: 'none' | 'horizontal' | 'vertical';
   }>({
     active: false,
@@ -1056,6 +1057,7 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     pointerId: -1,
     captureSet: false,
     isLinearMobile: false,
+    isTouch: false,
     axisLock: 'none',
   });
 
@@ -1103,6 +1105,10 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       pointerId: e.pointerId,
       captureSet: false,
       isLinearMobile: isMobile,
+      // Axis classification applies to touch only (see processDragMove):
+      // a mouse drag has no scroll gesture to conflict with, so it always
+      // rotates the table, on any axis.
+      isTouch: e.pointerType === 'touch',
       axisLock: 'none',
     };
   };
@@ -1126,13 +1132,19 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     const dyTotal = clientY - drag.startY;
     const distFromStart = Math.hypot(dxTotal, dyTotal);
 
-    // Directional lock on mobile: if the user is clearly scrolling vertically down
-    // toward the footer, yield immediately instead of fighting the scroll.
-    if (drag.isLinearMobile && drag.axisLock === 'none' && distFromStart >= 8) {
+    // Axis classification (touch only): once the finger has moved 10px from
+    // the press point, lock the gesture to its dominant axis. A clearly
+    // vertical touch is a page scroll, not a table turn — yield it to the
+    // browser (the stage root is touch-action: pan-y) and never rotate for
+    // the rest of this gesture. Diagonals are judged by the dominant axis;
+    // the 1.2× margin keeps near-diagonal swipes rotating instead of
+    // dropping to scroll. Runs BEFORE the capture below, so a vertical
+    // touch is never pointer-captured either.
+    if (drag.isTouch && drag.axisLock === 'none' && distFromStart >= 10) {
       drag.axisLock =
-        Math.abs(dxTotal) >= Math.abs(dyTotal) * 0.85
-          ? 'horizontal'
-          : 'vertical';
+        Math.abs(dyTotal) > Math.abs(dxTotal) * 1.2
+          ? 'vertical'
+          : 'horizontal';
     }
     if (drag.axisLock === 'vertical') {
       return;
@@ -1228,6 +1240,12 @@ export const RotaryTableStage = memo(function RotaryTableStage({
     if (pending) {
       processDragMove(pending.x, pending.y, pending.buttons);
     }
+    // Snapshot the axis lock, then reset it: the gesture is over
+    // (pointerup/cancel), so the next drag starts unclassified.
+    // handlePointerDown re-inits the whole record too — this is the
+    // explicit end-of-gesture reset.
+    const lockedVertical = drag.axisLock === 'vertical';
+    drag.axisLock = 'none';
 
     const now = performance.now();
     const dx = clientX - drag.startX;
@@ -1245,8 +1263,8 @@ export const RotaryTableStage = memo(function RotaryTableStage({
       return;
     }
 
-    // If mobile gesture locked to vertical scroll, restore angle cleanly without stepping
-    if (drag.axisLock === 'vertical') {
+    // If the gesture locked to vertical scroll, restore angle cleanly without stepping
+    if (lockedVertical) {
       animRef.current = {
         ...animRef.current,
         wheelAngle: drag.startWheelAngle,

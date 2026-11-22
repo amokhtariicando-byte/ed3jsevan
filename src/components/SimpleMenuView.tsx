@@ -1,8 +1,6 @@
 import React, {
   useCallback,
   useDeferredValue,
-  useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -204,9 +202,6 @@ interface SimpleMenuViewProps {
   onSelectItemDetails: (item: MenuItem) => void;
   onInspectOnTable: (item: MenuItem) => void;
   onOpenMobileCategories: () => void;
-  // Called once when the menu mounts, so App can lift the state-driven
-  // view-switch loading overlay exactly when the menu is ready to paint.
-  onReady?: () => void;
 }
 
 export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
@@ -216,7 +211,6 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   onSelectItemDetails,
   onInspectOnTable,
   onOpenMobileCategories,
-  onReady,
 }) => {
   const { lang, t, cafeInfo, formatDigits } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,24 +235,9 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
     [],
   );
 
-  // Safety net for the view-switch scroll flash: when this very tall view
-  // mounts (after its lazy chunk loads), the browser's scroll anchoring can
-  // drag the viewport toward the end of the page before the first paint.
-  // useLayoutEffect runs synchronously after the DOM updates but before
-  // paint, so the first frame is always the top of the menu. 'instant' is
-  // required: index.css sets `scroll-behavior: smooth` on <html>, so 'auto'
-  // would still animate. Mount-only: switching categories inside the menu
-  // keeps the user's scroll position, as before.
-  useLayoutEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, []);
-
-  // Tell App the menu has mounted so the state-driven loading overlay can
-  // lift. The overlay covers the whole lazy-chunk load gap; without this
-  // callback it would stay up until the safety timeout.
-  useEffect(() => {
-    onReady?.();
-  }, [onReady]);
+  // NOTE: no mount scroll here — this list is now a section of the single
+  // scrollable page, lazy-rendered when the user has already scrolled down
+  // to it; scrolling to top on mount would yank the user back to the hero.
 
   const localizedCategories = useMemo(
     () => MENU_CATEGORIES.map((c) => localizeCategory(c, lang)),
@@ -286,7 +265,10 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#F8F7F2] pt-20 pb-14 text-[#2F321C]">
+    <div className="min-h-screen bg-[#F8F7F2] pt-6 pb-14 text-[#2F321C] sm:pt-8">
+      {/* Mid-page section below the rotary-table hero (single scrollable
+      page): only a small top gap now — the old pt-20 cleared the fixed
+      header when this was a standalone view. */}
       <div className="mx-auto max-w-[1320px] px-4 sm:px-6 lg:px-10">
         {/* Search Bar (compact header: the eyebrow + big title + payment note
             were removed — the payment note already lives in the page footer) */}
@@ -369,9 +351,11 @@ export const SimpleMenuView: React.FC<SimpleMenuViewProps> = ({
           </div>
         </div>
 
-        {/* Search result count line */}
+        {/* Search result count line — break-words: the raw user query is
+            echoed here, and a long unbroken string would otherwise force
+            the page wider than the viewport (horizontal scroll). */}
         {searchQuery.trim() && (
-          <p className="mt-5 text-xs text-[#78716C]">
+          <p className="mt-5 text-xs break-words text-[#78716C]">
             {totalVisibleItems > 0
               ? `${formatDigits(totalVisibleItems)} ${t.resultsFoundSuffix}: «${searchQuery.trim()}»`
               : `${t.noSearchMatchPrefix}${searchQuery.trim()}${t.noSearchMatchSuffix}`}
