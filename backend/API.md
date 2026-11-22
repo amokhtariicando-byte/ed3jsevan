@@ -6,8 +6,10 @@ by `MockAdminApi` in `src/admin/api.ts`), so the admin views work unchanged
 against this backend once the HTTP client lands. Deployment is covered in
 `DEPLOY.md`.
 
-**Prices are stored in full تومان.** The frontend divides by 1000 for
-display — the backend never does that conversion.
+**Prices are stored as bare thousands of تومان** (e.g. `175` = ۱۷۵ هزار
+تومان), exactly as printed on the menu and as displayed by the frontend —
+there is no ×1000/÷1000 conversion anywhere: the seed, the mock, and
+`formatToman` all use the same bare numbers.
 
 **No ordering, no payment.** This API only manages the menu content.
 
@@ -131,9 +133,9 @@ interface AdminItem {
   categoryId: string;
   name: string;
   description: string;
-  price?: number;            // single fixed price, full تومان
-  priceBlend50?: number;     // 50/50 blend price, full تومان
-  priceArabica100?: number;  // 100% Arabica price, full تومان
+  price?: number;            // single fixed price, thousands of تومان (bare)
+  priceBlend50?: number;     // 50/50 blend price, thousands of تومان (bare)
+  priceArabica100?: number;  // 100% Arabica price, thousands of تومان (bare)
   supportsSyrup?: boolean;
   supportsMilkTemp?: boolean;
   highlight?: string;
@@ -161,7 +163,7 @@ interface AdminCategory {
   sortOrder: number;         // 0-based order in the category list
 }
 
-interface Syrup { id: string; name: string; price: number; }  // price: full تومان
+interface Syrup { id: string; name: string; price: number; }  // price: thousands of تومان (bare)
 
 type FeaturedPick = string[];  // item ids, max 3, display order
 

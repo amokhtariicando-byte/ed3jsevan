@@ -458,21 +458,24 @@ export function ItemEditorView({ itemId }: { itemId: string }) {
           <PhotoSlot
             label="عکس از بالا (روی بشقاب)"
             imageSrc={form.image || undefined}
-            onFile={(dataUrl) => set('image', dataUrl)}
+            onFile={(src) => set('image', src)}
             onRemove={() => set('image', '')}
+            slot="image"
           />
           <PhotoSlot
             label="عکس روبه‌رو (منوی ساده)"
             imageSrc={form.frontImage || undefined}
-            onFile={(dataUrl) => set('frontImage', dataUrl)}
+            onFile={(src) => set('frontImage', src)}
             onRemove={() => set('frontImage', '')}
+            slot="frontImage"
           />
           <PhotoSlot
             label="کات‌اوت شفاف (نمای روبه‌رو)"
-            hint="برای نمای روبه‌رو باید پس‌زمینه عکس شفاف باشد؛ حذف خودکار پس‌زمینه با بک‌اند می‌آید"
+            hint="پس‌زمینه عکس باید از قبل شفاف باشد (PNG/WebP شفاف)؛ بک‌اند پس‌زمینه را حذف نمی‌کند"
             imageSrc={form.cutoutImage || undefined}
-            onFile={(dataUrl) => set('cutoutImage', dataUrl)}
+            onFile={(src) => set('cutoutImage', src)}
             onRemove={() => set('cutoutImage', '')}
+            slot="cutoutImage"
             preserveTransparency
             tall
           />

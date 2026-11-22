@@ -17,6 +17,7 @@ import type {
   SeoMeta,
   Syrup,
 } from './types';
+import { RealAdminApi } from './realApi';
 
 /**
  * Mock implementation of the AdminApi contract. The store is seeded from the
@@ -341,5 +342,29 @@ export class MockAdminApi implements AdminApi {
   }
 }
 
-/** The single API instance the admin views use. */
-export const adminApi: AdminApi = new MockAdminApi();
+/**
+ * Base URL of the PHP backend, from VITE_EYVAN_API_BASE. Null when the
+ * variable is unset or blank — which means mock mode. No env var can be
+ * set on GitHub Pages, so the deployed preview keeps the mock + static
+ * menu behaviour exactly as before.
+ */
+export function getApiBaseUrl(): string | null {
+  const raw = import.meta.env.VITE_EYVAN_API_BASE;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  return trimmed === '' ? null : trimmed;
+}
+
+/** True when the admin talks to the real PHP backend. */
+export function isRealApiMode(): boolean {
+  return getApiBaseUrl() !== null;
+}
+
+/**
+ * The single API instance the admin views use. Real HTTP client when an
+ * API base is configured, otherwise the mock. The default is mock.
+ */
+export const adminApi: AdminApi = (() => {
+  const baseUrl = getApiBaseUrl();
+  return baseUrl ? new RealAdminApi(baseUrl) : new MockAdminApi();
+})();

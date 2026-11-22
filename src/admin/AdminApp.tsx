@@ -27,7 +27,12 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card';
-import { adminApi } from './api';
+import { adminApi, getApiBaseUrl, isRealApiMode } from './api';
+import {
+  clearStoredToken,
+  probeSetupNeeded,
+  setupAdminPassword,
+} from './realApi';
 import type { PublishState } from './types';
 const DashboardView = lazy(() =>
   import('./views/Dashboard').then((m) => ({ default: m.DashboardView })),
@@ -222,9 +227,31 @@ function formatPublishedAt(iso: string | null): string {
 }
 
 function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const realMode = isRealApiMode();
+  // In real mode the first mount probes whether first-run setup is still
+  // needed; in mock mode there is no setup and we go straight to login.
+  const [authMode, setAuthMode] = useState<'checking' | 'login' | 'setup'>(
+    realMode ? 'checking' : 'login',
+  );
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    if (!realMode) return;
+    let cancelled = false;
+    void probeSetupNeeded(getApiBaseUrl() ?? '/api').then((result) => {
+      if (cancelled) return;
+      // 'unknown' (unreachable backend, 5xx, …) falls back to the login
+      // form: login will surface the real error.
+      setAuthMode(result === 'needed' ? 'setup' : 'login');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [realMode]);
 
   const submit = async () => {
     if (password.trim().length === 0) {
@@ -233,6 +260,7 @@ function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       const ok = await adminApi.login(password);
       if (ok) {
@@ -248,13 +276,79 @@ function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
+  const submitSetup = async () => {
+    if (password.trim().length < 6) {
+      setError('رمز عبور باید حداقل ۶ کاراکتر باشد.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('تکرار رمز با رمز مطابقت ندارد.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await setupAdminPassword(
+        password,
+        getApiBaseUrl() ?? '/api',
+      );
+      if (!result.ok) {
+        if (result.reason === 'already_done') {
+          // Someone set the password in the meantime: back to login.
+          setAuthMode('login');
+          setNotice(result.message);
+          setPassword('');
+          setConfirmPassword('');
+        } else {
+          setError(result.message);
+        }
+        return;
+      }
+      // Setup succeeded: log in automatically with the same password.
+      const ok = await adminApi.login(password);
+      if (ok) {
+        window.sessionStorage.setItem(SESSION_KEY, '1');
+        onLoggedIn();
+      } else {
+        setAuthMode('login');
+        setNotice('رمز ساخته شد؛ حالا با همان رمز وارد شوید.');
+        setPassword('');
+        setConfirmPassword('');
+      }
+    } catch {
+      setError('خطایی رخ داد. دوباره تلاش کنید.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (authMode === 'checking') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-sm">
+          <CardContent className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
+            <Loader2 className="size-5 animate-spin" />
+            در حال بررسی…
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const isSetup = authMode === 'setup';
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-center text-xl">پنل مدیریت ایوان</CardTitle>
+          <CardTitle className="text-center text-xl">
+            {isSetup ? 'راه‌اندازی اولیه پنل مدیریت' : 'پنل مدیریت ایوان'}
+          </CardTitle>
           <CardDescription className="text-center">
-            برای مدیریت منوی کافه وارد شوید
+            {isSetup
+              ? 'رمز مدیر را برای اولین بار بسازید'
+              : 'برای مدیریت منوی کافه وارد شوید'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -263,32 +357,66 @@ function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
               htmlFor="admin-password"
               className="text-sm font-medium text-foreground"
             >
-              رمز عبور
+              {isSetup ? 'رمز عبور جدید' : 'رمز عبور'}
             </label>
             <PasswordInput
               id="admin-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void submit();
+                if (e.key === 'Enter')
+                  void (isSetup ? submitSetup() : submit());
               }}
-              placeholder="رمز عبور مدیر"
-              autoComplete="current-password"
+              placeholder={isSetup ? 'حداقل ۶ کاراکتر' : 'رمز عبور مدیر'}
+              autoComplete={isSetup ? 'new-password' : 'current-password'}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {notice && (
+              <p className="text-sm text-muted-foreground">{notice}</p>
+            )}
           </div>
+          {isSetup && (
+            <div className="space-y-2">
+              <label
+                htmlFor="admin-password-confirm"
+                className="text-sm font-medium text-foreground"
+              >
+                تکرار رمز عبور
+              </label>
+              <PasswordInput
+                id="admin-password-confirm"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submitSetup();
+                }}
+                placeholder="رمز را دوباره وارد کنید"
+                autoComplete="new-password"
+              />
+            </div>
+          )}
           <Button
             className="w-full"
             size="lg"
             disabled={busy}
-            onClick={() => void submit()}
+            onClick={() => void (isSetup ? submitSetup() : submit())}
           >
             {busy && <Loader2 className="size-4 animate-spin" />}
-            ورود
+            {isSetup ? 'ساخت رمز و ورود' : 'ورود'}
           </Button>
-          <Alert variant="info">
-            نسخه نمایشی — هر رمزی قبول می‌شود؛ ورود واقعی با بک‌اند PHP می‌آید.
-          </Alert>
+          {isSetup ? (
+            <Alert variant="info">
+              این رمز فقط برای مدیر است؛ پس از ساخت، ورود با همان رمز انجام
+              می‌شود.
+            </Alert>
+          ) : realMode ? (
+            <Alert variant="info">ورود با رمز مدیر — نشست ۱۲ ساعته.</Alert>
+          ) : (
+            <Alert variant="info">
+              نسخه نمایشی — هر رمزی قبول می‌شود؛ ورود واقعی با بک‌اند PHP
+              می‌آید.
+            </Alert>
+          )}
           <Button
             variant="ghost"
             className="w-full"
@@ -336,6 +464,23 @@ function AdminShell() {
       window.removeEventListener('eyvan-admin-changed', refreshPublish);
   }, [authed, refreshPublish]);
 
+  // Real mode: any API call that gets a 401 dispatches this event
+  // (realApi.ts); send the admin back to the login screen instead of
+  // leaving them on error toasts. Never fires in mock mode.
+  useEffect(() => {
+    if (!authed) return;
+    const onExpired = () => {
+      window.sessionStorage.removeItem(SESSION_KEY);
+      clearStoredToken();
+      setAuthed(false);
+      window.location.hash = '#/admin';
+      toast({ title: 'نشست شما منقضی شده؛ دوباره وارد شوید.', variant: 'error' });
+    };
+    window.addEventListener('eyvan-admin-session-expired', onExpired);
+    return () =>
+      window.removeEventListener('eyvan-admin-session-expired', onExpired);
+  }, [authed, toast]);
+
   const handlePublish = async () => {
     setPublishing(true);
     try {
@@ -351,6 +496,9 @@ function AdminShell() {
 
   const logout = () => {
     window.sessionStorage.removeItem(SESSION_KEY);
+    // Real mode: drop the bearer token too (no-op in mock mode, where no
+    // token is ever stored).
+    clearStoredToken();
     setAuthed(false);
     window.location.hash = '#/admin';
   };
